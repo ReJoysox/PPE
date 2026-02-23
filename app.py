@@ -6,8 +6,8 @@ from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfigurati
 import av
 
 # Настройка страницы
-st.set_page_config(page_title="SafeGuard Mobile", layout="centered")
-st.title("🛡️ SafeGuard ИИ: Mobile LIVE")
+st.set_page_config(page_title="SafeGuard LITE", layout="centered")
+st.title("🛡️ SafeGuard ИИ: Оптимизированный LIVE")
 
 # Загрузка модели
 @st.cache_resource
@@ -16,82 +16,68 @@ def load_model():
 
 model = load_model()
 
-# --- БОКОВАЯ ПАНЕЛЬ ---
-st.sidebar.header("Настройки")
-# Выбор камеры для телефона
-camera_option = st.sidebar.radio(
-    "Выберите камеру:",
-    ("Фронтальная (Selfie)", "Основная (Rear)"),
-    index=0
-)
-
-# Переводим выбор в понятный для браузера формат
-facing_mode = "user" if camera_option == "Фронтальная (Selfie)" else "environment"
-
+# Настройки в боковой панели
+st.sidebar.header("Настройки мобильной версии")
+camera_option = st.sidebar.radio("Камера:", ("Селфи", "Основная"))
+facing_mode = "user" if camera_option == "Селфи" else "environment"
 conf_val = st.sidebar.slider("Чувствительность", 0.1, 1.0, 0.5)
 
-# --- ЛОГИКА ОБРАБОТКИ ---
-def process_logic(img, model):
-    # Оптимизация imgsz=320 для скорости на мобильных устройствах
-    results = model.predict(img, conf=conf_val, imgsz=320, verbose=False)
-    boxes = results[0].boxes
-    
-    if len(boxes) == 0:
-        return img
-
-    people = []
-    protection = []
-
-    for box in boxes:
-        c = box.xyxy[0].tolist()
-        label = model.names[int(box.cls[0])].lower()
-        if 'person' in label or 'human' in label:
-            people.append(c)
-        else:
-            protection.append(c)
-            cv2.rectangle(img, (int(c[0]), int(c[1])), (int(c[2]), int(c[3])), (0, 255, 0), 2)
-
-    for p in people:
-        px1, py1, px2, py2 = p
-        # Проверка пересечения
-        is_safe = any(not (r[2] < px1 or r[0] > px2 or r[3] < py1 or r[1] > py2) for r in protection)
-        
-        color = (0, 255, 0) if is_safe else (0, 0, 255)
-        text = "SAFE" if is_safe else "NO PPE"
-        
-        cv2.rectangle(img, (int(px1), int(py1)), (int(px2), int(py2)), color, 1)
-        cv2.putText(img, text, (int(px1), int(py1-5)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-    
-    return img
-
+# --- УЛЬТРА-ОПТИМИЗИРОВАННАЯ ЛОГИКА ---
 class VideoProcessor(VideoProcessorBase):
-    def recv(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-        processed = process_logic(img, model)
-        return av.VideoFrame.from_ndarray(processed, format="bgr24")
+    def __init__(self):
+        self.frame_count = 0
+        self.last_results = None
 
-# Конфигурация WebRTC
+    def recv(self, frame):
+        self.frame_count += 1
+        img = frame.to_ndarray(format="bgr24")
+
+        # ХАК: Обрабатываем только каждый 5-й кадр, чтобы сервер не зависал
+        if self.frame_count % 5 == 0:
+            # imgsz=160 — экстремальное сжатие для ИИ (очень быстро)
+            results = model.predict(img, conf=conf_val, imgsz=160, verbose=False)
+            self.last_results = results[0].boxes
+        
+        # Если есть результаты с прошлого анализа — рисуем их
+        if self.last_results is not None:
+            people = []
+            protection = []
+
+            for box in self.last_results:
+                c = box.xyxy[0].tolist()
+                label = model.names[int(box.cls[0])].lower()
+                if 'person' in label or 'human' in label:
+                    people.append(c)
+                else:
+                    protection.append(c)
+                    cv2.rectangle(img, (int(c[0]), int(c[1])), (int(c[2]), int(c[3])), (0, 255, 0), 2)
+
+            for p in people:
+                px1, py1, px2, py2 = p
+                is_safe = any(not (r[2] < px1 or r[0] > px2 or r[3] < py1 or r[1] > py2) for r in protection)
+                color = (0, 255, 0) if is_safe else (0, 0, 255)
+                cv2.rectangle(img, (int(px1), int(py1)), (int(px2), int(py2)), color, 1)
+                if not is_safe:
+                    cv2.putText(img, "NO PPE", (int(px1), int(py1-5)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
+
+# Стандартная конфигурация серверов Google
 RTC_CONFIG = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
 
-# Запуск стримера
-ctx = webrtc_streamer(
-    key="mobile-ppe",
+webrtc_streamer(
+    key="mobile-fast",
     video_processor_factory=VideoProcessor,
     rtc_configuration=RTC_CONFIG,
-    # ПЕРЕДАЕМ ПАРАМЕТРЫ КАМЕРЫ
     media_stream_constraints={
         "video": {
-            "facingMode": facing_mode, # Выбор камеры здесь
-            "width": {"ideal": 480},
-            "height": {"ideal": 320},
-            "frameRate": {"ideal": 15}
+            "facingMode": facing_mode,
+            "width": {"max": 480}, # Ограничиваем размер кадра
+            "frameRate": {"max": 20}
         },
         "audio": False,
     },
-    async_processing=True,
+    async_processing=True, # Не ждать завершения ИИ для показа видео
 )
 
-if ctx.state.playing:
-    st.success(f"Трансляция запущена: {camera_option}")
-else:
-    st.info("Выберите камеру в боковом меню и нажмите START")
+st.warning("⚠️ Если видео зависло — нажмите STOP и снова START. Серверу нужно время 'прогреться'.")
