@@ -77,7 +77,7 @@ if model:
             return av.VideoFrame.from_ndarray(processed_img, format="bgr24")
 
     # Интерфейс
-    tab1, tab2 = st.tabs(["🎥 Живое видео", "📁 Загрузить фото"])
+    tab1, tab2 = st.tabs(["🎥 Видео", "📁 Загрузить фото"])
 
     with tab1:
         st.write("Нажмите 'Start' для запуска мониторинга")
