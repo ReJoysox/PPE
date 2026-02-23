@@ -4,87 +4,89 @@ from PIL import Image
 import cv2
 import numpy as np
 
-# Настройка интерфейса
+# Настройка страницы
 st.set_page_config(page_title="SafeGuard PRO", layout="centered")
 st.title("🛡️ SafeGuard ИИ")
-st.write("Система контроля промышленной безопасности")
 
 # Загрузка модели
 @st.cache_resource
 def load_model():
-    return YOLO('best.onnx', task='detect')
+    try:
+        model = YOLO('best.onnx', task='detect')
+        return model
+    except Exception as e:
+        st.error(f"Ошибка загрузки best.onnx: {e}")
+        return None
 
 model = load_model()
 
-# Настройки
-conf_val = st.sidebar.slider("Чувствительность ИИ", 0.1, 1.0, 0.5)
+if model:
+    # Показываем классы модели в боковой панели для отладки
+    st.sidebar.write("### Классы в вашей модели:")
+    st.sidebar.write(list(model.names.values()))
+    
+    conf_val = st.sidebar.slider("Чувствительность", 0.1, 1.0, 0.4)
 
-def process_and_draw(img, model, conf):
-    # Превращаем фото в формат для OpenCV
-    img_array = np.array(img)
-    img_cv = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-    h_img, w_img, _ = img_cv.shape
-
-    # Запускаем нейросеть
-    results = model.predict(img, conf=conf)
-    boxes = results[0].boxes
-
-    # Словари для хранения найденных объектов
-    people = []
-    protection = []
-
-    # Разбираем объекты по категориям
-    for box in boxes:
-        cls_id = int(box.cls[0])
-        label = model.names[cls_id].lower()
-        coords = box.xyxy[0].tolist() # [x1, y1, x2, y2]
+    def process_frame(img):
+        # Конвертация PIL -> OpenCV (BGR)
+        img_cv = cv2.cvtColor(np.array(img), list(cv2.COLOR_RGB2BGR if len(np.array(img).shape)==3 else cv2.COLOR_GRAY2BGR))
         
-        if label == 'person':
-            people.append(coords)
-        else:
-            protection.append({'label': label, 'coords': coords})
-
-    # Логика: проверяем каждого человека
-    for p in people:
-        px1, py1, px2, py2 = p
-        has_protection = False
+        # Запуск ИИ
+        results = model.predict(img, conf=conf_val)
+        boxes = results[0].boxes
         
-        # Проверяем, есть ли защита внутри или рядом с рамкой человека
-        for prot in protection:
-            rx1, ry1, rx2, ry2 = prot['coords']
-            # Если рамка защиты пересекается с рамкой человека
-            if not (rx2 < px1 or rx1 > px2 or ry2 < py1 or ry1 > py2):
-                has_protection = True
-                # Рисуем рамку защиты (зеленая)
-                cv2.rectangle(img_cv, (int(rx1), int(ry1)), (int(rx2), int(ry2)), (0, 255, 0), 3)
-                cv2.putText(img_cv, prot['label'].upper(), (int(rx1), int(ry1)-10), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        found_person = False
+        found_protection = False
 
-        # Если защиты нет — рисуем предупреждение над головой
-        if not has_protection:
-            # Вычисляем зону головы (верхняя часть рамки человека)
-            head_y = int(py1)
-            cv2.rectangle(img_cv, (int(px1), head_y), (int(px2), int(py1 + (py2-py1)*0.2)), (0, 0, 255), 2)
-            cv2.putText(img_cv, "!!! NO PROTECTION !!!", (int(px1), head_y - 15), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 3)
-            # Рисуем красную рамку вокруг человека, чтобы выделить нарушителя
-            cv2.rectangle(img_cv, (int(px1), int(py1)), (int(px2), int(py2)), (0, 0, 255), 1)
+        if len(boxes) == 0:
+            return cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
 
-    return cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
+        # 1. Сначала ищем всю защиту и рисуем её
+        for box in boxes:
+            cls_id = int(box.cls[0])
+            label = model.names[cls_id].lower()
+            xyxy = box.xyxy[0].tolist()
+            
+            # Если это НЕ человек, рисуем зеленую рамку защиты
+            if 'person' not in label and 'human' not in label:
+                found_protection = True
+                cv2.rectangle(img_cv, (int(xyxy[0]), int(xyxy[1])), (int(xyxy[2]), int(xyxy[3])), (0, 255, 0), 3)
+                cv2.putText(img_cv, label.upper(), (int(xyxy[0]), int(xyxy[1]-10)), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            else:
+                found_person = True
+                # Рисуем тонкую рамку вокруг человека
+                cv2.rectangle(img_cv, (int(xyxy[0]), int(xyxy[1])), (int(xyxy[2]), int(xyxy[3])), (255, 255, 255), 1)
 
-# Вкладки
-tab1, tab2 = st.tabs(["📷 Сделать фото", "📁 Загрузить файл"])
+        # 2. Логика предупреждения
+        # Если нашли человека, но не нашли защиту в кадре
+        if found_person and not found_protection:
+            for box in boxes:
+                label = model.names[int(box.cls[0])].lower()
+                if 'person' in label or 'human' in label:
+                    xyxy = box.xyxy[0].tolist()
+                    # Пишем КРАСНЫМ над головой
+                    cv2.putText(img_cv, "!!! NO PROTECTION !!!", (int(xyxy[0]), int(xyxy[1]-15)), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 3)
+                    # Выделяем голову красным прямоугольником
+                    head_h = int((xyxy[3] - xyxy[1]) * 0.25)
+                    cv2.rectangle(img_cv, (int(xyxy[0]), int(xyxy[1])), (int(xyxy[2]), int(xyxy[1] + head_h)), (0, 0, 255), 2)
 
-with tab1:
-    img_file = st.camera_input("Наведите камеру")
-    if img_file is not None:
-        img = Image.open(img_file)
-        processed_img = process_and_draw(img, model, conf_val)
-        st.image(processed_img, width=500)
+        return cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
 
-with tab2:
-    uploaded_file = st.file_uploader("Выберите изображение...", type=['jpg', 'jpeg', 'png'])
-    if uploaded_file is not None:
-        img = Image.open(uploaded_file)
-        processed_img = process_and_draw(img, model, conf_val)
-        st.image(processed_img, width=500)
+    # Интерфейс вкладок
+    t1, t2 = st.tabs(["🎥 Камера", "📁 Загрузка"])
+
+    with t1:
+        cam_img = st.camera_input("Сделайте снимок")
+        if cam_img:
+            res = process_frame(Image.open(cam_img))
+            st.image(res, width=500)
+
+    with t2:
+        up_img = st.file_uploader("Загрузите фото", type=['jpg', 'png', 'jpeg'])
+        if up_img:
+            res = process_frame(Image.open(up_img))
+            st.image(res, width=500)
+else:
+    st.error("Файл best.onnx не найден в репозитории!")
