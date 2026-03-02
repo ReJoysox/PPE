@@ -7,7 +7,7 @@ from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfigurati
 import av
 
 st.set_page_config(page_title="SafeGuard PRO", layout="centered")
-st.title("🛡️ SafeGuard ИИ: Система мониторинга")
+st.title("🛡️ Инспектор СИЗ(система индивидуальной безопасности)")
 
 @st.cache_resource
 def load_model():
