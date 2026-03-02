@@ -1,7 +1,8 @@
+ultralytics
 streamlit
-streamlit-webrtc
 onnxruntime
 opencv-python-headless
-numpy<2.0.0
-av
 pillow
+numpy
+streamlit-webrtc
+av
