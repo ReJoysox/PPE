@@ -1,130 +1,101 @@
 import streamlit as st
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
-import av
+from ultralytics import YOLO
+from PIL import Image
 import cv2
 import numpy as np
-import onnxruntime as ort
-from PIL import Image
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
+import av
 
-# 1. Настройка страницы
-st.set_page_config(page_title="SafeGuard PRO", layout="centered")
-st.title("🛡️ SafeGuard ИИ v5.0")
+# Настройка страницы
+st.set_page_config(page_title="SafeGuard LIVE", layout="centered")
+st.title("🛡️ SafeGuard ИИ: Real-Time")
 
-# 2. Загрузка модели ONNX
+# Загрузка модели
 @st.cache_resource
-def load_session():
-    # Использование CPUExecutionProvider для стабильности в облаке
-    return ort.InferenceSession("best.onnx", providers=['CPUExecutionProvider'])
+def load_model():
+    try:
+        return YOLO('best.onnx', task='detect')
+    except Exception as e:
+        st.error(f"Ошибка загрузки модели: {e}")
+        return None
 
-session = load_session()
+model = load_model()
 
-# !!! ВНИМАНИЕ: Проверь порядок классов в своем metadata.json !!!
-# Если порядок другой - просто переставь их в этом списке
-classes = ['Helmet', 'No-Helmet', 'No-Vest', 'Person', 'Vest']
+if model:
+    st.sidebar.write("### Обнаружение классов:")
+    st.sidebar.write(list(model.names.values()))
+    conf_val = st.sidebar.slider("Чувствительность", 0.1, 1.0, 0.4)
 
-# --- ПРОФЕССИОНАЛЬНАЯ ОБРАБОТКА (NMS) ---
-def detect_and_draw(img_bgr, conf_threshold):
-    h_orig, w_orig = img_bgr.shape[:2]
-    
-    # Подготовка (YOLOv8 требует 640x640 и Float32)
-    blob = cv2.resize(img_bgr, (640, 640))
-    blob = blob.astype(np.float32) / 255.0
-    blob = blob.transpose(2, 0, 1) # HWC -> CHW
-    blob = np.expand_dims(blob, 0)
-
-    # Запуск модели
-    outputs = session.run(None, {session.get_inputs()[0].name: blob})
-    output = outputs[0][0] # Матрица [классы+4, 8400]
-
-    # Списки для фильтрации NMS
-    boxes = []
-    scores = []
-    class_ids = []
-
-    # Разбор вывода YOLOv8
-    # YOLOv8 выводит: [x, y, w, h, class0, class1, ...]
-    for i in range(output.shape[1]):
-        classes_scores = output[4:, i]
-        class_id = np.argmax(classes_scores)
-        score = classes_scores[class_id]
-
-        if score > conf_threshold:
-            cx, cy, w, h = output[:4, i]
-            
-            # Масштабируем координаты к оригиналу
-            x1 = int((cx - w/2) * (w_orig / 640))
-            y1 = int((cy - h/2) * (h_orig / 640))
-            width = int(w * (w_orig / 640))
-            height = int(h * (h_orig / 640))
-
-            boxes.append([x1, y1, width, height])
-            scores.append(float(score))
-            class_ids.append(class_id)
-
-    # Фильтрация NMS (чтобы не было 100 рамок на одном человеке)
-    indices = cv2.dnn.NMSBoxes(boxes, scores, conf_threshold, 0.45)
-
-    if len(indices) > 0:
-        for i in indices.flatten():
-            x, y, w, h = boxes[i]
-            label = classes[class_ids[i]] if class_ids[i] < len(classes) else "Unknown"
-            conf = scores[i]
-
-            # Настройка цвета
-            if "no" in label.lower() or label.lower() == "person":
-                color = (0, 0, 255) # Красный для нарушений и людей без пометок
-            else:
-                color = (0, 255, 0) # Зеленый для касок и жилетов
-
-            # Рисуем рамку
-            cv2.rectangle(img_bgr, (x, y), (x + w, y + h), color, 3)
-            
-            # Текст подписи
-            text = f"{label.upper()} {int(conf*100)}%"
-            cv2.putText(img_bgr, text, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-
-    return img_bgr
-
-# --- КЛАСС ДЛЯ ВИДЕОПОТОКА ---
-class VideoProcessor(VideoProcessorBase):
-    def __init__(self):
-        self.conf_threshold = 0.5
-
-    def recv(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-        processed_img = detect_and_draw(img, self.conf_threshold)
-        return av.VideoFrame.from_ndarray(processed_img, format="bgr24")
-
-# --- ИНТЕРФЕЙС ---
-st.sidebar.header("Настройки ИИ")
-conf_val = st.sidebar.slider("Чувствительность", 0.1, 1.0, 0.5)
-st.sidebar.write("---")
-st.sidebar.write("Классы модели:", classes)
-
-tab1, tab2 = st.tabs(["🎥 Живое видео", "📷 Анализ фото"])
-
-with tab1:
-    RTC_CONFIG = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
-    webrtc_ctx = webrtc_streamer(
-        key="ppe-vision",
-        video_processor_factory=VideoProcessor,
-        rtc_configuration=RTC_CONFIG,
-        media_stream_constraints={"video": {"width": 640, "height": 480, "frameRate": 20}, "audio": False},
-        async_processing=True,
-    )
-    if webrtc_ctx.video_processor:
-        webrtc_ctx.video_processor.conf_threshold = conf_val
-
-with tab2:
-    img_file = st.file_uploader("Загрузите изображение", type=["jpg", "png", "jpeg"])
-    cam_file = st.camera_input("Или сделайте мгновенное фото")
-    
-    active_file = img_file if img_file else cam_file
-
-    if active_file:
-        input_image = Image.open(active_file)
-        img_bgr = cv2.cvtColor(np.array(input_image.convert("RGB")), cv2.COLOR_RGB2BGR)
+    # --- ФУНКЦИЯ ОБРАБОТКИ КАДРА ---
+    def process_image_logic(img_cv, model, conf):
+        results = model.predict(img_cv, conf=conf, verbose=False)
+        boxes = results[0].boxes
         
-        with st.spinner('Анализирую...'):
-            result_bgr = detect_and_draw(img_bgr, conf_val)
-            st.image(cv2.cvtColor(result_bgr, cv2.COLOR_BGR2RGB), use_column_width=True)
+        if len(boxes) == 0:
+            return img_cv
+
+        people = []
+        protection_boxes = []
+
+        for box in boxes:
+            cls_id = int(box.cls[0])
+            label = model.names[cls_id].lower()
+            coords = box.xyxy[0].tolist()
+            
+            if 'person' in label or 'human' in label:
+                people.append(coords)
+            else:
+                protection_boxes.append(coords)
+                cv2.rectangle(img_cv, (int(coords[0]), int(coords[1])), (int(coords[2]), int(coords[3])), (0, 255, 0), 2)
+                cv2.putText(img_cv, label.upper(), (int(coords[0]), int(coords[1]-5)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+
+        for p in people:
+            px1, py1, px2, py2 = p
+            is_protected = False
+            for prot in protection_boxes:
+                rx1, ry1, rx2, ry2 = prot
+                if not (rx2 < px1 or rx1 > px2 or ry2 < py1 or ry1 > py2):
+                    is_protected = True
+                    break
+            
+            if is_protected:
+                cv2.rectangle(img_cv, (int(px1), int(py1)), (int(px2), int(py2)), (255, 255, 255), 1)
+            else:
+                cv2.putText(img_cv, "NO PROTECTION", (int(px1), int(py1-10)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                head_h = int((py2 - py1) * 0.25)
+                cv2.rectangle(img_cv, (int(px1), int(py1)), (int(px2), int(py1 + head_h)), (0, 0, 255), 3)
+                cv2.rectangle(img_cv, (int(px1), int(py1)), (int(px2), int(py2)), (0, 0, 255), 1)
+        
+        return img_cv
+
+    # --- КЛАСС ДЛЯ REAL-TIME ВИДЕО ---
+    class VideoProcessor:
+        def recv(self, frame):
+            img = frame.to_ndarray(format="bgr24")
+            # Обрабатываем кадр
+            processed_img = process_image_logic(img, model, conf_val)
+            return av.VideoFrame.from_ndarray(processed_img, format="bgr24")
+
+    # Интерфейс
+    tab1, tab2 = st.tabs(["🎥 Живое видео", "📁 Загрузить фото"])
+
+    with tab1:
+        st.write("Нажмите 'Start' для запуска мониторинга")
+        webrtc_streamer(
+            key="ppe-detection",
+            video_processor_factory=VideoProcessor,
+            rtc_configuration={
+                "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+            }
+        )
+
+    with tab2:
+        up_img = st.file_uploader("Выберите фото", type=['jpg', 'png', 'jpeg'])
+        if up_img:
+            img = Image.open(up_img)
+            img_cv = cv2.cvtColor(np.array(img.convert("RGB")), cv2.COLOR_RGB2BGR)
+            res_cv = process_image_logic(img_cv, model, conf_val)
+            st.image(cv2.cvtColor(res_cv, cv2.COLOR_BGR2RGB), width=500)
+
+else:
+    st.error("Ошибка загрузки модели.")
