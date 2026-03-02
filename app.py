@@ -1,94 +1,92 @@
 import streamlit as st
-from ultralytics import YOLO
-from PIL import Image
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
+import av
 import cv2
 import numpy as np
+import onnxruntime as ort
 
 # Настройка страницы
-st.set_page_config(page_title="SafeGuard PRO", layout="centered")
-st.markdown("<style>.stApp {background-color: #0f172a; color: white;}</style>", unsafe_allow_html=True)
+st.set_page_config(page_title="SafeGuard LIVE", layout="centered")
+st.title("🛡️ SafeGuard ИИ: Real-Time")
 
-st.title("🛡️ SafeGuard ИИ")
-st.write("Система контроля СИЗ (v5.0 Stable)")
-
-# Загрузка модели
+# 1. Загрузка модели ONNX
 @st.cache_resource
-def load_model():
-    # Загружаем твой файл best.onnx
-    return YOLO('best.onnx', task='detect')
+def load_session():
+    # Используем CPU-движок для стабильности на сервере
+    return ort.InferenceSession("best.onnx", providers=['CPUExecutionProvider'])
 
-model = load_model()
+session = load_session()
+# Классы (замени на свои, если они другие)
+classes = ['Helmet', 'No-Helmet', 'No-Vest', 'Person', 'Vest']
 
-# Настройки в сайдбаре
-conf_val = st.sidebar.slider("Чувствительность ИИ", 0.1, 1.0, 0.5)
+# 2. Логика обработки кадра
+class VideoProcessor(VideoProcessorBase):
+    def __init__(self):
+        self.conf_threshold = 0.5
 
-def process_image(img, model, conf):
-    # Превращаем PIL Image в BGR массив для OpenCV
-    img_rgb = np.array(img.convert("RGB"))
-    img_cv = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
-    
-    # Запуск ИИ
-    results = model.predict(img, conf=conf, imgsz=320, verbose=False)
-    boxes = results[0].boxes
-    
-    if len(boxes) == 0:
-        return img_rgb, 0
+    def recv(self, frame):
+        img = frame.to_ndarray(format="bgr24")
+        h_orig, w_orig = img.shape[:2]
 
-    people = []
-    protection = []
+        # Подготовка кадра (640x640 для YOLO)
+        input_img = cv2.resize(img, (640, 640))
+        input_img = input_img.astype(np.float32) / 255.0
+        input_img = input_img.transpose(2, 0, 1)
+        input_img = np.expand_dims(input_img, 0)
 
-    # 1. Сортируем объекты
-    for box in boxes:
-        c = box.xyxy[0].tolist()
-        label = model.names[int(box.cls[0])].lower()
-        if 'person' in label or 'human' in label:
-            people.append(c)
-        else:
-            protection.append({'label': label, 'coords': c})
-            # Рисуем саму защиту (зеленым)
-            cv2.rectangle(img_cv, (int(c[0]), int(c[1])), (int(c[2]), int(c[3])), (0, 255, 0), 3)
-            cv2.putText(img_cv, label.upper(), (int(c[0]), int(c[1]-7)), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        # Инференс
+        outputs = session.run(None, {session.get_inputs()[0].name: input_img})
+        output = outputs[0][0] # [84, 8400]
 
-    # 2. Проверяем каждого человека
-    violations = 0
-    for p in people:
-        px1, py1, px2, py2 = p
-        is_safe = False
-        for prot in protection:
-            rx1, ry1, rx2, ry2 = prot['coords']
-            # Если рамка защиты пересекается с рамкой человека
-            if not (rx2 < px1 or rx1 > px2 or ry2 < py1 or ry1 > py2):
-                is_safe = True
-                break
-        
-        if not is_safe:
-            violations += 1
-            # Красная зона головы
-            head_h = int((py2 - py1) * 0.25)
-            cv2.rectangle(img_cv, (int(px1), int(py1)), (int(px2), int(py1 + head_h)), (0, 0, 255), 3)
-            cv2.putText(img_cv, "NO PROTECTION", (int(px1), int(py1-15)), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-            cv2.rectangle(img_cv, (int(px1), int(py1)), (int(px2), int(py2)), (0, 0, 255), 1)
-        else:
-            # Если всё ок - белая рамка
-            cv2.rectangle(img_cv, (int(px1), int(py1)), (int(px2), int(py2)), (255, 255, 255), 1)
+        # Постобработка (отрисовка)
+        for i in range(output.shape[1]):
+            scores = output[4:, i]
+            class_id = np.argmax(scores)
+            score = scores[class_id]
 
-    return cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB), violations
+            if score > self.conf_threshold:
+                cx, cy, w, h = output[:4, i]
+                
+                # Масштабирование координат
+                x1 = int((cx - w/2) * (w_orig / 640))
+                y1 = int((cy - h/2) * (h_orig / 640))
+                x2 = int((cx + w/2) * (w_orig / 640))
+                y2 = int((cy + h/2) * (h_orig / 640))
 
-# Интерфейс
-t1, t2 = st.tabs(["📷 Сделать фото", "📁 Загрузить файл"])
+                label = classes[class_id] if class_id < len(classes) else "Object"
+                
+                # Логика: если 'person' - рисуем тонкую рамку, если СИЗ - жирную
+                if label.lower() == 'person':
+                    cv2.rectangle(img, (x1, y1), (x2, y2), (255, 255, 255), 1)
+                else:
+                    color = (0, 255, 0) if "no" not in label.lower() else (0, 0, 255)
+                    # Если нарушения (no-helmet), пишем крупно
+                    if "no" in label.lower():
+                        cv2.putText(img, "WARNING: NO PPE", (x1, y1-15), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,255), 3)
+                    
+                    cv2.rectangle(img, (x1, y1), (x2, y2), color, 4)
+                    cv2.putText(img, f"{label} {int(score*100)}%", (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-with t1:
-    cam_img = st.camera_input("Наведите камеру")
-    if cam_img:
-        res, count = process_image(Image.open(cam_img), model, conf_val)
-        st.image(res, width=500)
-        if count > 0: st.error(f"Нарушений: {count}")
-        else: st.success("Безопасно")
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
 
-with t2:
-    file_img = st.file_uploader("Выберите фото", type=['jpg','jpeg','png'])
-    if file_img:
-        res, count = process_image(Image.open(file_img), model, conf_val)
-        st.image(res, width=500)
+# 3. Настройка WebRTC (используем публичные STUN-серверы Google)
+RTC_CONFIG = RTCConfiguration(
+    {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+)
+
+webrtc_streamer(
+    key="safe-guard-live",
+    video_processor_factory=VideoProcessor,
+    rtc_configuration=RTC_CONFIG,
+    media_stream_constraints={
+        "video": {
+            "width": {"ideal": 640},
+            "height": {"ideal": 480},
+            "frameRate": {"ideal": 15} # Ограничиваем FPS для стабильности сервера
+        },
+        "audio": False,
+    },
+    async_processing=True,
+)
+
+st.sidebar.info("Для переключения камер на телефоне используйте настройки браузера или разверните видео.")
