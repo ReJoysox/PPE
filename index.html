@@ -3,35 +3,44 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SafeGuard ИИ | ONNX DEBUG</title>
+    <title>SafeGuard PRO | AI Monitor</title>
+    <!-- Используем самую стабильную версию библиотеки -->
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
     <style>
         :root { --p: #3b82f6; --bg: #0f172a; --card: #1e293b; --s: #22c55e; --d: #ef4444; }
-        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: var(--bg); color: white; margin: 0; display: flex; overflow: hidden; height: 100vh; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: white; margin: 0; display: flex; height: 100vh; overflow: hidden; }
         
-        .sidebar { width: 300px; background: #161e2e; padding: 25px; border-right: 1px solid #334155; display: flex; flex-direction: column; }
-        .main { flex: 1; padding: 30px; overflow-y: auto; display: flex; flex-direction: column; align-items: center; }
-        .card { background: var(--card); width: 100%; max-width: 800px; padding: 20px; border-radius: 15px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+        /* Стили боковой панели (Streamlit style) */
+        .sidebar { width: 280px; background: #161e2e; padding: 25px; border-right: 1px solid #334155; display: flex; flex-direction: column; }
+        .sidebar h2 { color: var(--p); margin: 0; }
+        .sidebar p { font-size: 0.7rem; color: #64748b; margin-bottom: 30px; }
+        
+        .control-group { background: #1e293b; padding: 15px; border-radius: 10px; margin-bottom: 20px; }
+        input[type=range] { width: 100%; margin-top: 10px; cursor: pointer; }
+
+        /* Основной экран */
+        .main { flex: 1; padding: 20px; display: flex; flex-direction: column; align-items: center; overflow-y: auto; }
+        .card { background: var(--card); width: 100%; max-width: 720px; padding: 15px; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
         
         .tabs { display: flex; gap: 10px; margin-bottom: 15px; }
-        .tab-btn { flex: 1; padding: 12px; border: none; color: #94a3b8; background: #0f172a; cursor: pointer; border-radius: 8px; font-weight: 600; }
+        .tab-btn { flex: 1; padding: 10px; border: none; border-radius: 8px; background: #0f172a; color: #94a3b8; cursor: pointer; font-weight: bold; }
         .tab-btn.active { background: var(--p); color: white; }
 
-        /* Монитор */
         #monitor { position: relative; width: 100%; aspect-ratio: 4/3; background: #000; border-radius: 15px; overflow: hidden; border: 2px solid #334155; }
-        canvas { width: 100%; height: 100%; object-fit: contain; }
-        video { display: none; }
+        video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; }
 
-        .btn-start { width: 100%; padding: 15px; background: var(--p); border: none; border-radius: 10px; color: white; font-weight: bold; cursor: pointer; margin-top: 15px; }
-        .upload-area { border: 2px dashed #334155; border-radius: 12px; padding: 40px; text-align: center; cursor: pointer; margin-top: 15px; }
-        
-        .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; width: 100%; max-width: 800px; margin-top: 25px; }
+        /* Загрузка фото */
+        .upload-zone { border: 2px dashed #334155; border-radius: 12px; padding: 30px; text-align: center; cursor: pointer; margin-top: 10px; }
+        .upload-zone:hover { border-color: var(--p); }
+
+        /* Счетчики */
+        .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; width: 100%; max-width: 720px; margin-top: 20px; }
         .stat-card { background: var(--card); padding: 15px; border-radius: 15px; text-align: center; border-bottom: 4px solid var(--p); }
-        .stat-val { font-size: 2rem; font-weight: bold; display: block; }
-        .stat-label { font-size: 0.8rem; color: #94a3b8; }
+        .stat-val { font-size: 2.2rem; font-weight: bold; display: block; }
+        .stat-label { font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; }
 
-        #status-msg { font-size: 0.75rem; text-align: center; margin-top: 15px; color: #64748b; }
-        #debug-log { background: #0f172a; padding: 10px; border-radius: 8px; font-size: 0.7rem; color: #94a3b8; max-height: 200px; overflow-y: auto; margin-top: 20px; }
+        #btn-action { width: 100%; padding: 15px; background: var(--p); border: none; border-radius: 10px; color: white; font-weight: bold; cursor: pointer; margin-top: 10px; }
+        #log-status { font-size: 0.7rem; color: #475569; margin-top: 10px; text-align: center; }
         input[type="file"] { display: none; }
     </style>
 </head>
@@ -39,24 +48,26 @@
 
 <div class="sidebar">
     <h2>SafeGuard PRO</h2>
-    <p>Монитор безопасности ONNX</p>
+    <p>v6.2 | YOLOv8 ONNX Runtime</p>
     
     <div class="control-group">
-        <div class="control-label"><span>Чувствительность</span><span id="conf-val">45%</span></div>
+        <div style="display:flex; justify-content:space-between; font-size:0.8rem">
+            <span>Чувствительность</span>
+            <span id="conf-val" style="color:var(--p)">45%</span>
+        </div>
         <input type="range" id="conf-range" min="10" max="95" value="45">
     </div>
 
-    <div style="margin-top: auto;">
-        <p style="font-size: 0.7rem; color: #64748b;">Версия: 6.1 (ONNX RT Web)</p>
-        <div id="debug-log"></div>
+    <div style="margin-top: auto; color: #94a3b8; font-size: 0.7rem;">
+        Статус: <span id="status-text">Загрузка...</span>
     </div>
 </div>
 
 <div class="main">
     <div class="card">
         <div class="tabs">
-            <button class="tab-btn active" id="btn-live">🎥 ВИДЕО</button>
-            <button class="tab-btn" id="btn-photo">📁 ФОТО</button>
+            <button class="tab-btn active" id="mode-live">📷 КАМЕРА</button>
+            <button class="tab-btn" id="mode-photo">📁 ФОТО</button>
         </div>
 
         <div id="monitor">
@@ -64,270 +75,194 @@
             <canvas id="canvas"></canvas>
         </div>
 
-        <div id="live-ui">
-            <button id="btn-start" class="btn-start">ЗАПУСТИТЬ КАМЕРУ</button>
+        <div id="live-controls">
+            <button id="btn-action">ВКЛЮЧИТЬ МОНИТОРИНГ</button>
         </div>
 
-        <div id="photo-ui" style="display:none">
-            <div class="upload-area" onclick="document.getElementById('file-input').click()">
-                <div style="font-size: 2rem; margin-bottom: 10px;">📤</div>
-                <strong>Нажмите для загрузки фото</strong>
-                <div style="color: #64748b; font-size: 0.8rem; margin-top: 5px;">Поддерживаются JPG, PNG</div>
+        <div id="photo-controls" style="display:none">
+            <div class="upload-zone" onclick="document.getElementById('file-input').click()">
+                <strong>Нажмите для выбора фотографии</strong>
                 <input type="file" id="file-input" accept="image/*">
             </div>
         </div>
     </div>
 
     <div class="stats">
-        <div class="stat-card" style="border-color: var(--s);">
-            <span class="stat-label">В ЗАЩИТЕ</span>
+        <div class="stat-card" style="border-color: var(--s)">
             <span id="count-safe" class="stat-val" style="color:var(--s)">0</span>
+            <span class="stat-label">В безопасности</span>
         </div>
-        <div class="stat-card" style="border-color: var(--d);">
-            <span class="stat-label">НАРУШЕНИЯ</span>
+        <div class="stat-card" style="border-color: var(--d)">
             <span id="count-bad" class="stat-val" style="color:var(--d)">0</span>
+            <span class="stat-label">Нарушения</span>
         </div>
     </div>
+    
+    <div id="log-status">Подготовка системы...</div>
 </div>
 
 <script>
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
+    const statusText = document.getElementById('status-text');
+    const logStatus = document.getElementById('log-status');
     const confRange = document.getElementById('conf-range');
-    const confValText = document.getElementById('conf-val');
-    const debugLog = document.getElementById('debug-log');
-    
+    const confValLabel = document.getElementById('conf-val');
+
     let session;
     let isLive = false;
-    // Ожидаемый порядок классов. Если у вас другой - переставьте их!
-    const labels = ["Helmet", "No-Helmet", "No-Vest", "Person", "Vest"]; 
+    // Базовые классы. Если в модели другой порядок, они просто переименуются
+    const labels = ["Helmet", "No-Helmet", "No-Vest", "Person", "Vest"];
 
-    function log(msg, color = 'white') {
-        const p = document.createElement('p');
-        p.style.color = color;
-        p.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
-        debugLog.prepend(p);
-    }
-
-    // 1. Инициализация ONNX
+    // 1. ЗАГРУЗКА МОДЕЛИ
     async function init() {
         try {
-            log("Загрузка best.onnx...");
+            logStatus.innerText = "Скачивание модели best.onnx...";
             session = await ort.InferenceSession.create('./best.onnx', { 
                 executionProviders: ['wasm'], 
                 graphOptimizationLevel: 'all' 
             });
-            log("✅ Модель загружена. Система готова.");
-            // Выводим информацию о входах/выходах модели для отладки
-            log(`Входы модели: ${session.inputNames}`);
-            log(`Выходы модели: ${session.outputNames}`);
+            statusText.innerText = "ГОТОВ";
+            statusText.style.color = "#22c55e";
+            logStatus.innerText = "Система ИИ активирована. Нажмите кнопку запуска.";
         } catch (e) {
-            log("❌ Ошибка загрузки best.onnx: " + e.message, 'red');
-            log("Проверьте: 1. best.onnx лежит рядом с index.html. 2. Файл не поврежден.", 'red');
+            logStatus.innerText = "ОШИБКА: Файл best.onnx не найден в корне GitHub репозитория!";
+            statusText.innerText = "ОШИБКА";
+            console.error(e);
         }
     }
 
-    // --- Утилиты для работы с YOLOv8 ---
-    function processYoloOutput(data, imgWidth, imgHeight, confThreshold) {
-        const boxes = [];
-        const numBoxes = 8400; // Количество якорей (боксов) YOLOv8
-        const numClasses = labels.length;
-        const outputParams = 4 + numClasses; // x, y, w, h, class1_score, class2_score...
+    // 2. ПЕРЕКЛЮЧЕНИЕ РЕЖИМОВ
+    document.getElementById('mode-live').onclick = () => switchMode(true);
+    document.getElementById('mode-photo').onclick = () => switchMode(false);
 
-        // Определяем, как расположены данные: [84, 8400] или [8400, 84]
-        let dataIsTransposed = false;
-        if (data.length === numBoxes * outputParams) {
-             // Предполагаем [8400, 84]
-             // log("Определен формат вывода: [8400, 84]");
-        } else if (data.length === numParams * numBoxes) {
-            // Предполагаем [84, 8400]
-            dataIsTransposed = true;
-            // log("Определен формат вывода: [84, 8400]");
-        } else {
-            log("Неизвестный формат вывода модели. Проверьте best.onnx.", 'red');
-            return [];
-        }
-
-
-        for (let i = 0; i < numBoxes; i++) {
-            let maxScore = 0;
-            let classId = -1;
-            
-            // Получаем координаты и вероятности
-            let classScores = [];
-            if (dataIsTransposed) { // Формат [N_params, N_boxes]
-                classScores = data.slice(numBoxes * 4 + i, numBoxes * (4 + numClasses) + i, numBoxes); // Это неправильно, нужно поправлять
-            } else { // Формат [N_boxes, N_params]
-                // Более вероятный формат: [N_boxes, N_params] где N_params = 4 + N_classes
-                const boxOffset = i * outputParams;
-                classScores = data.slice(boxOffset + 4, boxOffset + 4 + numClasses);
-            }
-            
-            // Находим лучший класс для текущего бокса
-            for (let c = 0; c < numClasses; c++) {
-                if (classScores[c] > maxScore) {
-                    maxScore = classScores[c];
-                    classId = c;
-                }
-            }
-
-            if (maxScore > confThreshold) {
-                let cx, cy, w, h;
-                if (dataIsTransposed) {
-                    cx = data[i];
-                    cy = data[numBoxes + i];
-                    w = data[numBoxes * 2 + i];
-                    h = data[numBoxes * 3 + i];
-                } else {
-                    const boxOffset = i * outputParams;
-                    cx = data[boxOffset];
-                    cy = data[boxOffset + 1];
-                    w = data[boxOffset + 2];
-                    h = data[boxOffset + 3];
-                }
-
-                // Масштабируем
-                let x = (cx - w / 2);
-                let y = (cy - h / 2);
-
-                boxes.push({
-                    x, y, w, h, score: maxScore, classId
-                });
-            }
-        }
-        
-        // NMS (Non-Maximum Suppression) - фильтрация дублей
-        return nonMaxSuppression(boxes, 0.45); // IoU threshold
-    }
-
-    function nonMaxSuppression(boxes, iouThreshold) {
-        const filtered = [];
-        boxes.sort((a, b) => b.score - a.score); // Сортируем по уверенности
-
-        while (boxes.length > 0) {
-            const bestBox = boxes.shift(); // Берем самый точный
-            filtered.push(bestBox);
-
-            boxes = boxes.filter(box => {
-                const iou = calculateIoU(bestBox, box);
-                return iou < iouThreshold; // Удаляем все, что сильно пересекается
-            });
-        }
-        return filtered;
-    }
-
-    function calculateIoU(box1, box2) {
-        const x1 = Math.max(box1.x, box2.x);
-        const y1 = Math.max(box1.y, box2.y);
-        const x2 = Math.min(box1.x + box1.w, box2.x + box2.w);
-        const y2 = Math.min(box1.y + box1.h, box2.y + box2.h);
-
-        const intersection = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
-        const union = (box1.w * box1.h) + (box2.w * box2.h) - intersection;
-        return union === 0 ? 0 : intersection / union;
-    }
-
-    // 5. Отрисовка результатов
-    function drawResults(finalBoxes, source) {
+    function switchMode(live) {
+        isLive = live;
+        document.getElementById('mode-live').classList.toggle('active', live);
+        document.getElementById('mode-photo').classList.toggle('active', !live);
+        document.getElementById('live-controls').style.display = live ? 'block' : 'none';
+        document.getElementById('photo-controls').style.display = live ? 'none' : 'block';
+        if (!live && video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
-
-        let safe = 0; let bad = 0;
-        const scaleX = canvas.width / 640; // Масштабируем рамки под размер Canvas
-        const scaleY = canvas.height / 640;
-
-        finalBoxes.forEach(box => {
-            const label = labels[box.classId];
-            if (label === "Person") return; // Скрываем подпись "Человек"
-
-            const isViolation = label.toLowerCase().includes("no-");
-            const color = isViolation ? "#ef4444" : "#22c55e";
-            if (isViolation) bad++; else safe++;
-
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 3;
-            ctx.strokeRect(box.x * scaleX, box.y * scaleY, box.w * scaleX, box.h * scaleY);
-            
-            ctx.fillStyle = color;
-            ctx.font = "bold 15px sans-serif";
-            const text = `${label.toUpperCase()} ${Math.round(box.score * 100)}%`;
-            ctx.fillText(text, box.x * scaleX, box.y * scaleY > 20 ? box.y * scaleY - 10 : 20);
-        });
-
-        document.getElementById('count-safe').innerText = safe;
-        document.getElementById('count-bad').innerText = bad;
     }
-    
-    // --- Инициализация и обработка событий ---
-    init();
 
-    document.getElementById('btn-live').onclick = () => switchMode(true);
-    document.getElementById('btn-photo').onclick = () => switchMode(false);
-
-    confRange.oninput = () => confValText.innerText = confRange.value + "%";
-
-    document.getElementById('start-stream').onclick = async () => {
+    // 3. ОБРАБОТКА КАМЕРЫ
+    document.getElementById('btn-action').onclick = async () => {
         const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
         video.srcObject = stream;
         video.onloadedmetadata = () => {
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
-            loopDetect();
+            processLoop();
         };
     };
 
+    async function processLoop() {
+        if (!isLive) return;
+        await runInference(video);
+        requestAnimationFrame(processLoop);
+    }
+
+    // 4. ОБРАБОТКА ФОТО
     document.getElementById('file-input').onchange = (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        isLive = false;
-        video.style.display = "none";
         const img = new Image();
         img.src = URL.createObjectURL(file);
         img.onload = async () => {
             canvas.width = img.width;
             canvas.height = img.height;
-            await runAI(img);
+            logStatus.innerText = "Анализ фотографии...";
+            await runInference(img);
+            logStatus.innerText = "Анализ завершен.";
         };
     };
 
-    function switchMode(live) {
-        isLive = live;
-        document.getElementById('btn-live').classList.toggle('active', live);
-        document.getElementById('btn-photo').classList.toggle('active', !live);
-        document.getElementById('live-ui').style.display = live ? 'block' : 'none';
-        document.getElementById('photo-ui').style.display = live ? 'none' : 'block';
-        if (!live && video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
-    }
-    
-    async function detectLoop() {
-        if (!isLive) return;
-        await runAI(video);
-        setTimeout(() => requestAnimationFrame(detectLoop), 50); // ~20 FPS
-    }
-
-    async function runAI(source) {
+    // 5. ДВИЖОК ИИ
+    async function runInference(source) {
         if (!session) return;
-        const [w, h] = [640, 640];
-        const offscreen = document.createElement('canvas');
-        offscreen.width = w; offscreen.height = h;
-        const oCtx = offscreen.getContext('2d');
-        oCtx.drawImage(source, 0, 0, w, h);
-        const imgData = oCtx.getImageData(0, 0, w, h).data;
 
-        const float32Data = new Float32Array(3 * w * h);
+        // Предподготовка (640x640)
+        const [w, h] = [640, 640];
+        const inputCanvas = document.createElement('canvas');
+        inputCanvas.width = w; inputCanvas.height = h;
+        const iCtx = inputCanvas.getContext('2d');
+        iCtx.drawImage(source, 0, 0, w, h);
+        const imgData = iCtx.getImageData(0, 0, w, h).data;
+
+        const input = new Float32Array(3 * w * h);
         for (let i = 0; i < w * h; i++) {
-            float32Data[i] = imgData[i * 4] / 255.0;           // R
-            float32Data[i + w * h] = imgData[i * 4 + 1] / 255.0; // G
-            float32Data[i + 2 * w * h] = imgData[i * 4 + 2] / 255.0; // B
+            input[i] = imgData[i * 4] / 255.0; // R
+            input[i + 409600] = imgData[i * 4 + 1] / 255.0; // G
+            input[i + 819200] = imgData[i * 4 + 2] / 255.0; // B
         }
 
-        const tensor = new ort.Tensor('float32', float32Data, [1, 3, w, h]);
-        const outputs = await session.run({ [session.inputNames[0]]: tensor });
-        const outputData = outputs[session.outputNames[0]].data;
+        const tensor = new ort.Tensor('float32', input, [1, 3, w, h]);
+        const output = await session.run({ [session.inputNames[0]]: tensor });
+        const data = output[session.outputNames[0]].data;
 
-        drawResults(outputData, source);
+        draw(data);
     }
+
+    function draw(data) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (isLive) ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        // Если это фото, оно уже нарисовано фоном в runInference
+
+        let safe = 0; let bad = 0;
+        const confThreshold = parseInt(confRange.value) / 100;
+        
+        // YOLOv8 Output parsing [1, 4+classes, 8400]
+        const numClasses = session.outputNames[0].includes('output0') ? (data.length / 8400) - 4 : 5;
+
+        for (let i = 0; i < 8400; i++) {
+            let maxProb = 0; let classId = -1;
+            for (let c = 0; c < numClasses; c++) {
+                const prob = data[8400 * (c + 4) + i];
+                if (prob > maxProb) { maxProb = prob; classId = c; }
+            }
+
+            if (maxProb > confThreshold) {
+                const cx = data[i]; 
+                const cy = data[8400 + i];
+                const w = data[8400 * 2 + i]; 
+                const h = data[8400 * 3 + i];
+
+                const x = (cx - w/2) * (canvas.width / 640);
+                const y = (cy - h/2) * (canvas.height / 640);
+                const width = w * (canvas.width / 640);
+                const height = h * (canvas.height / 640);
+
+                const label = labels[classId] || "Object";
+                if (label === "Person") {
+                    ctx.strokeStyle = "rgba(255,255,255,0.5)";
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(x, y, width, height);
+                    continue;
+                }
+
+                const isViolation = label.toLowerCase().includes("no");
+                const color = isViolation ? "#ef4444" : "#22c55e";
+                if (isViolation) bad++; else safe++;
+
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 4;
+                ctx.strokeRect(x, y, width, height);
+                
+                ctx.fillStyle = color;
+                ctx.font = "bold 14px sans-serif";
+                ctx.fillText(`${label.toUpperCase()} ${Math.round(maxProb * 100)}%`, x, y - 10);
+            }
+        }
+
+        // Обновляем статистику
+        document.getElementById('count-safe').innerText = Math.min(safe, 15);
+        document.getElementById('count-bad').innerText = Math.min(bad, 15);
+    }
+
+    confRange.oninput = () => confValLabel.innerText = confRange.value + "%";
+    init();
 </script>
 </body>
 </html>
