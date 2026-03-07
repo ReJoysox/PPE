@@ -3,85 +3,151 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SafeGuard Pro | YOLOv8 ONNX</title>
+    <title>SafeGuard ИИ | Система Мониторинга</title>
+    <!-- Основные библиотеки для работы ИИ -->
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
     <style>
         :root { --p: #3b82f6; --bg: #0f172a; --card: #1e293b; --s: #22c55e; --d: #ef4444; }
-        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: white; margin: 0; padding: 15px; display: flex; flex-direction: column; align-items: center; }
-        .container { width: 100%; max-width: 900px; background: var(--card); padding: 20px; border-radius: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
-        h1 { color: var(--p); margin: 0; font-size: 1.5rem; text-align: center; }
-        #status-bar { padding: 10px; background: #334155; border-radius: 10px; margin: 15px 0; font-size: 0.8rem; text-align: center; }
-        #monitor-wrapper { position: relative; width: 100%; max-width: 640px; aspect-ratio: 4/3; background: #000; border-radius: 15px; overflow: hidden; border: 3px solid #334155; margin: 0 auto; }
-        video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; }
-        .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 15px 0; }
-        .btn { padding: 15px; border: none; border-radius: 10px; font-weight: bold; color: white; cursor: pointer; transition: 0.3s; font-size: 0.9rem; }
-        .btn-live { background: var(--p); }
-        .btn-photo { background: #8b5cf6; text-align: center; }
-        .stats { display: flex; justify-content: space-around; background: #0f172a; padding: 15px; border-radius: 12px; }
-        .stat-item { text-align: center; }
-        .stat-val { display: block; font-size: 1.5rem; font-weight: bold; }
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: var(--bg); color: white; margin: 0; display: flex; justify-content: center; min-height: 100vh; }
+        
+        /* Layout как в Streamlit */
+        .app-container { display: grid; grid-template-columns: 260px 1fr; width: 100%; max-width: 1200px; }
+        
+        .sidebar { background: #161e2e; padding: 20px; border-right: 1px solid #334155; }
+        .main-content { padding: 30px; display: flex; flex-direction: column; align-items: center; }
+        
+        .card { background: var(--card); padding: 20px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 100%; max-width: 700px; }
+        
+        /* Монитор */
+        #monitor-wrapper { position: relative; width: 100%; background: #000; border-radius: 12px; overflow: hidden; border: 2px solid #334155; line-height: 0; }
+        canvas { width: 100%; height: auto; display: block; }
+        video { display: none; }
+
+        /* Кнопки и Табы */
+        .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+        .tab-btn { padding: 10px 20px; background: #334155; border: none; color: white; border-radius: 8px; cursor: pointer; }
+        .tab-btn.active { background: var(--p); }
+        
+        .btn-main { width: 100%; padding: 15px; background: var(--p); border: none; border-radius: 10px; color: white; font-weight: bold; cursor: pointer; margin-top: 10px; }
+        
+        /* Статистика */
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px; width: 100%; }
+        .stat-card { background: #0f172a; padding: 15px; border-radius: 10px; text-align: center; border-bottom: 4px solid var(--p); }
+        .stat-val { font-size: 2rem; font-weight: bold; display: block; }
+        
+        #status-msg { font-size: 0.8rem; color: #94a3b8; margin-top: 10px; }
         input[type="file"] { display: none; }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <h1>🛡️ SafeGuard Pro v6.0</h1>
-    <div id="status-bar">Ожидание загрузки best.onnx...</div>
-
-    <div id="monitor-wrapper">
-        <video id="video" autoplay muted playsinline style="display:none"></video>
-        <canvas id="canvas" width="640" height="480"></canvas>
+<div class="app-container">
+    <!-- БОКОВАЯ ПАНЕЛЬ -->
+    <div class="sidebar">
+        <h2 style="color:var(--p)">SafeGuard PRO</h2>
+        <p style="font-size: 0.8rem; color: #94a3b8;">Система на базе YOLOv8 ONNX</p>
+        <hr style="border: 0; border-top: 1px solid #334155; margin: 20px 0;">
+        <label>Чувствительность:</label>
+        <input type="range" id="conf-range" min="0.1" max="0.9" step="0.05" value="0.45" style="width:100%">
+        <div style="text-align: center; margin-top: 5px;" id="conf-val">0.45</div>
     </div>
 
-    <div class="controls">
-        <button class="btn btn-live" onclick="startCamera()">🎥 ЖИВОЙ ЭФИР</button>
-        <label class="btn btn-photo" style="display:flex; align-items:center; justify-content:center; cursor:pointer;">
-            📁 АНАЛИЗ ФОТО <input type="file" accept="image/*" onchange="handleImage(event)">
-        </label>
-    </div>
+    <!-- ОСНОВНАЯ ЧАСТЬ -->
+    <div class="main-content">
+        <div class="card">
+            <div class="tabs">
+                <button class="tab-btn active" id="mode-live">📷 Видео LIVE</button>
+                <button class="tab-btn" id="mode-photo">📁 Загрузить фото</button>
+            </div>
 
-    <div class="stats">
-        <div class="stat-item">В ЗАЩИТЕ: <span id="count-safe" class="stat-val" style="color:var(--s)">0</span></div>
-        <div class="stat-item">НАРУШЕНИЙ: <span id="count-bad" class="stat-val" style="color:var(--d)">0</span></div>
+            <div id="monitor-wrapper">
+                <video id="video" autoplay muted playsinline></video>
+                <canvas id="canvas"></canvas>
+            </div>
+
+            <div id="live-controls">
+                <button class="btn-main" id="start-btn">ЗАПУСТИТЬ МОНИТОРИНГ</button>
+            </div>
+
+            <div id="photo-controls" style="display:none">
+                <label class="btn-main" style="display:block; text-align:center; background:#8b5cf6">
+                    ВЫБРАТЬ ФАЙЛ
+                    <input type="file" id="file-input" accept="image/*">
+                </label>
+            </div>
+
+            <div id="status-msg">Загрузка нейросети best.onnx...</div>
+        </div>
+
+        <!-- СТАТИСТИКА -->
+        <div class="stats-grid">
+            <div class="stat-card" style="border-color: var(--s);">
+                <span class="stat-label">В ЗАЩИТЕ</span>
+                <span id="count-safe" class="stat-val" style="color:var(--s)">0</span>
+            </div>
+            <div class="stat-card" style="border-color: var(--d);">
+                <span class="stat-label">НАРУШЕНИЯ</span>
+                <span id="count-bad" class="stat-val" style="color:var(--d)">0</span>
+            </div>
+        </div>
     </div>
 </div>
 
 <script>
-    const status = document.getElementById('status-bar');
+    const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
-    const video = document.getElementById('video');
-    
+    const status = document.getElementById('status-msg');
+    const confRange = document.getElementById('conf-range');
+    const confVal = document.getElementById('conf-val');
+
     let session;
     let isLive = false;
+    let labels = ["Helmet", "No-Helmet", "No-Vest", "Person", "Vest"]; // Твои классы
 
-    // Названия классов для YOLOv8 (проверь свои в Roboflow!)
-    const labels = ["Helmet", "No-Helmet", "No-Vest", "Person", "Vest"];
-
-    // 1. ЗАГРУЗКА МОДЕЛИ
+    // 1. Инициализация ИИ
     async function init() {
         try {
-            // Инициализация движка ONNX
-            session = await ort.InferenceSession.create('./best.onnx', { executionProviders: ['wasm'] });
-            status.innerText = "СИСТЕМА ГОТОВА";
+            // Оптимизация для браузера
+            const options = { executionProviders: ['wasm'], graphOptimizationLevel: 'all' };
+            session = await ort.InferenceSession.create('./best.onnx', options);
+            status.innerText = "✅ Нейросеть загружена. Система готова.";
             status.style.color = "#22c55e";
-            console.log("Модель загружена. Входы:", session.inputNames, "Выходы:", session.outputNames);
         } catch (e) {
-            status.innerText = "ОШИБКА: Файл best.onnx не найден или не поддерживается";
+            status.innerText = "❌ Ошибка: положите best.onnx в папку с index.html";
             status.style.color = "#ef4444";
             console.error(e);
         }
     }
 
-    // 2. КАМЕРА
-    async function startCamera() {
-        if (!session) return;
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-        video.srcObject = stream;
-        video.style.display = "block";
-        isLive = true;
-        detectLoop();
+    // 2. Переключение вкладок
+    document.getElementById('mode-live').onclick = () => switchMode(true);
+    document.getElementById('mode-photo').onclick = () => switchMode(false);
+
+    function switchMode(live) {
+        isLive = live;
+        document.getElementById('mode-live').classList.toggle('active', live);
+        document.getElementById('mode-photo').classList.toggle('active', !live);
+        document.getElementById('live-controls').style.display = live ? 'block' : 'none';
+        document.getElementById('photo-controls').style.display = live ? 'none' : 'block';
+        if (!live) stopCamera();
+    }
+
+    // 3. Работа с камерой
+    document.getElementById('start-btn').onclick = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+            video.srcObject = stream;
+            video.onloadedmetadata = () => {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                detectLoop();
+            };
+        } catch (err) { alert("Нет доступа к камере"); }
+    };
+
+    function stopCamera() {
+        if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
     }
 
     async function detectLoop() {
@@ -90,116 +156,8 @@
         requestAnimationFrame(detectLoop);
     }
 
-    // 3. ФОТО
-    function handleImage(e) {
+    // 4. Работа с фото
+    document.getElementById('file-input').onchange = (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        isLive = false;
-        video.style.display = "none";
-        const img = new Image();
-        img.src = URL.createObjectURL(file);
-        img.onload = async () => {
-            // Рисуем фото на канвас перед анализом
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            await runInference(img);
-        };
-    }
-
-    // 4. ГЛАВНАЯ ЛОГИКА
-    async function runInference(source) {
-        if (!session) return;
-
-        try {
-            // Подготовка тензора [1, 3, 640, 640]
-            const [w, h] = [640, 640];
-            const floatData = await prepareImage(source, w, h);
-            const inputTensor = new ort.Tensor('float32', floatData, [1, 3, w, h]);
-
-            // Запуск нейросети
-            const outputs = await session.run({ images: inputTensor });
-            const output = outputs[session.outputNames[0]].data; // Берем первый доступный выход
-
-            processOutput(output, source);
-        } catch (err) {
-            console.error("Ошибка инференса:", err);
-        }
-    }
-
-    async function prepareImage(source, width, height) {
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = width;
-        tempCanvas.height = height;
-        const tCtx = tempCanvas.getContext('2d');
-        tCtx.drawImage(source, 0, 0, width, height);
-        const imgData = tCtx.getImageData(0, 0, width, height).data;
         
-        const floatData = new Float32Array(3 * width * height);
-        for (let i = 0; i < width * height; i++) {
-            floatData[i] = imgData[i * 4] / 255.0; // R
-            floatData[i + width * height] = imgData[i * 4 + 1] / 255.0; // G
-            floatData[i + 2 * width * height] = imgData[i * 4 + 2] / 255.0; // B
-        }
-        return floatData;
-    }
-
-    function processOutput(data, source) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
-
-        let safe = 0; let bad = 0;
-        const threshold = 0.45; // Снизил порог для теста
-
-        // YOLOv8 выход: [1, 4+N_classes, 8400]
-        // Мы перебираем 8400 возможных боксов
-        for (let i = 0; i < 8400; i++) {
-            let maxScore = 0;
-            let classId = -1;
-
-            // Проверяем скоры всех классов (начинаются с 4-го индекса)
-            for (let c = 0; c < labels.length; c++) {
-                let score = data[8400 * (c + 4) + i];
-                if (score > maxScore) {
-                    maxScore = score;
-                    classId = c;
-                }
-            }
-
-            if (maxScore > threshold) {
-                const label = labels[classId];
-                if (label === "Person") continue; // Игнорируем класс человек
-
-                // Координаты (YOLOv8 выплевывает их в формате cx, cy, w, h)
-                let cx = data[i] * (canvas.width / 640);
-                let cy = data[8400 + i] * (canvas.height / 640);
-                let w = data[8400 * 2 + i] * (canvas.width / 640);
-                let h = data[8400 * 3 + i] * (canvas.height / 640);
-
-                let x = cx - w / 2;
-                let y = cy - h / 2;
-
-                const isViolation = label.toLowerCase().includes("no");
-                const color = isViolation ? "#ef4444" : "#22c55e";
-                
-                if (isViolation) bad++; else safe++;
-
-                // Рисуем
-                ctx.strokeStyle = color;
-                ctx.lineWidth = 3;
-                ctx.strokeRect(x, y, w, h);
-                
-                ctx.fillStyle = color;
-                ctx.font = "bold 14px Arial";
-                ctx.fillText(label.toUpperCase(), x, y > 15 ? y - 5 : 15);
-            }
-        }
-
-        // Обновляем статистику (упрощенно)
-        document.getElementById('count-safe').innerText = Math.min(safe, 20);
-        document.getElementById('count-bad').innerText = Math.min(bad, 20);
-    }
-
-    init();
-</script>
-</body>
-</html>
