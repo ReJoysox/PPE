@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafeGuard ИИ | Система Мониторинга СИЗ</title>
+    <!-- Подключаем ядро нейросети YOLOv8 -->
+    <script src="https://cdn.roboflow.com/0.2.26/roboflow.js"></script>
+    <style>
+        :root { --p: #3b82f6; --bg: #0f172a; --card: #1e293b; --danger: #ef4444; --success: #22c55e; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: white; margin: 0; padding: 10px; display: flex; flex-direction: column; align-items: center; }
+        .app-container { width: 100%; max-width: 900px; background: var(--card); padding: 20px; border-radius: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); margin-top: 10px; }
+        
+        /* Монитор */
+        #monitor { position: relative; width: 100%; aspect-ratio: 4/3; background: #000; border-radius: 15px; overflow: hidden; border: 3px solid #334155; margin: 15px 0; }
+        video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; }
+        
+        .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
+        .btn { padding: 15px; border: none; border-radius: 10px; font-weight: bold; color: white; cursor: pointer; font-size: 0.9rem; transition: 0.3s; }
+        .btn-live { background: var(--p); }
+        .btn-photo { background: #8b5cf6; text-align: center; }
+        .btn:hover { opacity: 0.8; transform: translateY(-2px); }
+        
+        .status-bar { padding: 10px; background: #334155; border-radius: 8px; font-size: 0.8rem; margin-bottom: 10px; color: #38bdf8; font-weight: bold; }
+        .stats { display: flex; justify-content: space-around; background: #0f172a; padding: 10px; border-radius: 10px; margin-top: 10px; }
+        .stat-item { text-align: center; }
+        .stat-val { display: block; font-size: 1.2rem; font-weight: bold; }
+        
+        input[type="file"] { display: none; }
+        #loading-overlay { position: absolute; top:0; left:0; width:100%; height:100%; background: rgba(15,23,42,0.9); z-index:10; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+        .loader { width: 40px; height: 40px; border: 4px solid #334155; border-top-color: var(--p); border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <h2 style="margin:0; text-align:center; color:var(--p)">🛡️ SafeGuard ИИ <small style="font-size:0.5em; color:gray">v6.0 PRO</small></h2>
+    
+    <div id="monitor">
+        <div id="loading-overlay">
+            <div class="loader"></div>
+            <p id="load-text" style="margin-top:10px; font-size:0.8rem">Загрузка YOLOv8...</p>
+        </div>
+        <video id="video" autoplay muted playsinline style="display:none"></video>
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <div class="status-bar" id="status">Инициализация ИИ...</div>
+
+    <div class="controls">
+        <button class="btn btn-live" onclick="startCamera()">🎥 ЖИВОЙ ЭФИР</button>
+        <label class="btn btn-photo">
+            📁 АНАЛИЗ ФОТО
+            <input type="file" accept="image/*" onchange="processImage(event)">
+        </label>
+    </div>
+
+    <div class="stats">
+        <div class="stat-item">В ЗАЩИТЕ: <span id="count-safe" class="stat-val" style="color:var(--success)">0</span></div>
+        <div class="stat-item">НАРУШЕНИЙ: <span id="count-bad" class="stat-val" style="color:var(--danger)">0</span></div>
+    </div>
+</div>
+
+<script>
+    // ТВОИ ДАННЫЕ АВТОРИЗАЦИИ
+    const API_KEY = "rf_LKryTgEjdCbkT8neRDfLFtdPHzj2";
+    const MODEL_ID = "construction-site-safety";
+    const VERSION = 4;
+
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const status = document.getElementById('status');
+    const loader = document.getElementById('loading-overlay');
+
+    let model = null;
+    let isLive = false;
+
+    // 1. ЗАГРУЗКА МОДЕЛИ
+    async function init() {
+        try {
+            roboflow.auth({ publishable_key: API_KEY });
+            model = await roboflow.load({ model: MODEL_ID, version: VERSION });
+            status.innerText = "СИСТЕМА ГОТОВА (EDGE AI)";
+            loader.style.display = "none";
+        } catch (e) {
+            status.innerText = "Ошибка! Используйте GitHub Pages (HTTPS)";
+            document.getElementById('load-text').innerText = "ОШИБКА ДОСТУПА";
+        }
+    }
+
+    // 2. КАМЕРА
+    async function startCamera() {
+        if (!model) return;
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        video.srcObject = stream;
+        video.style.display = "block";
+        isLive = true;
+        detect();
+    }
+
+    async function detect() {
+        if (!isLive) return;
+        const predictions = await model.detect(video);
+        render(predictions, video);
+        requestAnimationFrame(detect);
+    }
+
+    // 3. ФОТО
+    function processImage(event) {
+        const file = event.target.files[0];
+        if (!file || !model) return;
+        isLive = false;
+        video.style.display = "none";
+        const img = new Image();
+        img.src = URL.createObjectURL(file);
+        img.onload = async () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            const predictions = await model.detect(img);
+            render(predictions, img);
+        };
+    }
+
+    // 4. ГЛАВНАЯ ЛОГИКА (БЕЗОПАСНОСТЬ)
+    function render(predictions, source) {
+        if (isLive) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+        }
+
+        let people = [];
+        let gear = [];
+
+        // Сортируем объекты (Фильтр 0.65 от шапок)
+        predictions.forEach(p => {
+            if (p.confidence > 0.65) {
+                if (p.class.toLowerCase() === "person") people.append(p);
+                else gear.append(p);
+            }
+        });
+
+        let safe = 0;
+        let bad = 0;
+
+        people.forEach(person => {
+            // Проверка: есть ли каска/жилет в зоне этого человека
+            let hasPPE = gear.some(g => {
+                // Если центр СИЗ внутри рамки человека
+                return (g.x > person.x - person.width/2 && g.x < person.x + person.width/2 &&
+                        g.y > person.y - person.height/2 && g.y < person.y + person.height/2);
+            });
+
+            const color = hasPPE ? "#22c55e" : "#ef4444";
+            if (hasPPE) safe++; else bad++;
+
+            // Рисуем рамку вокруг человека
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 3;
+            ctx.strokeRect(person.x - person.width/2, person.y - person.height/2, person.width, person.height);
+
+            // Если НЕТ ЗАЩИТЫ — выделяем голову и пишем статус
+            if (!hasPPE) {
+                ctx.fillStyle = color;
+                // Красная плашка над головой
+                ctx.fillRect(person.x - person.width/2, person.y - person.height/2 - 25, person.width, 25);
+                ctx.fillStyle = "white";
+                ctx.font = "bold 14px Arial";
+                ctx.fillText("НЕТ ЗАЩИТЫ", person.x - person.width/2 + 5, person.y - person.height/2 - 7);
+                
+                // Рамка вокруг головы
+                ctx.strokeRect(person.x - person.width/2, person.y - person.height/2, person.width, person.height * 0.25);
+            }
+        });
+
+        // Рисуем рамки самих касок (зеленым)
+        gear.forEach(g => {
+            ctx.strokeStyle = "#22c55e";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(g.x - g.width/2, g.y - g.height/2, g.width, g.height);
+        });
+
+        document.getElementById('count-safe').innerText = safe;
+        document.getElementById('count-bad').innerText = bad;
+    }
+
+    init();
+</script>
+</body>
+</html>
