@@ -1,317 +1,387 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SafeGuard ИИ | Идеальная точность</title>
-    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
-    <style>
-        :root { --p: #3b82f6; --bg: #0f172a; --card: #1e293b; --s: #22c55e; --d: #ef4444; }
-        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: var(--bg); color: white; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
-        .container { width: 100%; max-width: 900px; background: var(--card); padding: 25px; border-radius: 20px; box-shadow: 0 15px 40px rgba(0,0,0,0.5); }
-        h1 { color: var(--p); margin: 0 0 15px; text-align: center; font-size: 1.8rem; }
-        
-        #monitor { position: relative; width: 100%; background: #000; border-radius: 12px; overflow: hidden; border: 2px solid #334155; display: flex; justify-content: center; align-items: center; min-height: 480px; }
-        canvas { max-width: 100%; max-height: 600px; display: block; }
-        video { display: none; }
-
-        .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 20px 0; }
-        .btn { padding: 15px; border: none; border-radius: 10px; font-weight: bold; color: white; cursor: pointer; transition: 0.2s; font-size: 1rem; }
-        .btn-live { background: var(--p); }
-        .btn-photo { background: #8b5cf6; text-align: center; }
-        .btn:hover { opacity: 0.8; transform: translateY(-2px); }
-
-        .settings { background: #0f172a; padding: 15px; border-radius: 10px; margin-bottom: 20px; border: 1px solid #334155; }
-        .settings label { display: flex; justify-content: space-between; font-size: 1rem; margin-bottom: 10px; font-weight: bold;}
-        input[type=range] { width: 100%; cursor: pointer; }
-
-        .stats { display: flex; justify-content: space-around; background: #0f172a; padding: 15px; border-radius: 12px; margin-top: 10px; border: 1px solid #334155;}
-        .stat-item { text-align: center; flex: 1; }
-        .stat-val { display: block; font-size: 2.5rem; font-weight: bold; }
-        
-        #status { text-align: center; color: #38bdf8; font-weight: bold; margin-bottom: 10px; font-size: 0.9rem;}
-        input[type="file"] { display: none; }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SafeGuard | PPE Inspector</title>
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+  <style>
+    :root{--bg:#0f172a;--card:#1e293b;--p:#3b82f6;--ok:#22c55e;--bad:#ef4444;--mut:#94a3b8;}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;padding:16px}
+    .wrap{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:340px 1fr;gap:16px}
+    .panel,.main{background:var(--card);border-radius:16px;box-shadow:0 15px 35px rgba(0,0,0,.35)}
+    .panel{padding:14px}
+    .main{padding:14px}
+    h1{margin:0 0 8px;font-size:20px;color:var(--p)}
+    .small{font-size:12px;color:var(--mut);line-height:1.35}
+    label{display:block;font-size:12px;color:var(--mut);margin-top:10px;margin-bottom:6px}
+    input[type="text"]{width:100%;padding:10px;border-radius:10px;border:1px solid #334155;background:#0b1220;color:#fff}
+    input[type="range"]{width:100%}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+    button{padding:12px;border-radius:12px;border:0;background:var(--p);color:#fff;font-weight:700;cursor:pointer}
+    button.secondary{background:#8b5cf6}
+    .status{margin-top:10px;font-size:12px;color:#38bdf8;word-break:break-word}
+    .monitor{position:relative;width:100%;aspect-ratio:4/3;background:#000;border:2px solid #334155;border-radius:14px;overflow:hidden}
+    canvas, video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+    video{display:none}
+    .stats{margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .stat{background:#0b1220;border:1px solid #334155;border-radius:14px;padding:12px;text-align:center}
+    .stat .v{font-size:28px;font-weight:800}
+    .stat .t{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.08em}
+    .ok{color:var(--ok)} .bad{color:var(--bad)}
+    .hint{margin-top:10px;font-size:12px;color:var(--mut)}
+    input[type=file]{display:none}
+    .filelabel{display:block;text-align:center;background:#8b5cf6;padding:12px;border-radius:12px;font-weight:700;cursor:pointer}
+  </style>
 </head>
 <body>
+  <div class="wrap">
+    <div class="panel">
+      <h1>SafeGuard PRO</h1>
+      <div class="small">
+        Рисуем <b>ОДНУ рамку на человека</b>. СИЗ используются только для определения статуса.<br/>
+        Нужно один раз указать ID классов из твоей модели.
+      </div>
 
-<div class="container">
-    <h1>🛡️ SafeGuard ИИ v10.0</h1>
-    <div id="status">Загрузка файла best.onnx...</div>
+      <label>Confidence (порог уверенности): <span id="thrText">35%</span></label>
+      <input id="thr" type="range" min="5" max="95" step="5" value="35" />
 
-    <div class="settings">
-        <label>
-            <span>Чувствительность ИИ:</span>
-            <span id="conf-val" style="color:var(--p);">40%</span>
+      <div class="row">
+        <div>
+          <label>ID класса(ов) PERSON (через запятую)</label>
+          <input id="personIds" type="text" value="3" placeholder="например: 0 или 3" />
+        </div>
+        <div>
+          <label>ID класса(ов) Helmet+Vest (через запятую)</label>
+          <input id="ppeIds" type="text" value="0,4" placeholder="например: 0,4" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>ID класса(ов) NO-Helmet/NO-Vest (через запятую)</label>
+          <input id="noPpeIds" type="text" value="1,2" placeholder="например: 1,2" />
+        </div>
+        <div>
+          <label>FPS лимит (для видео)</label>
+          <input id="fps" type="text" value="10" />
+        </div>
+      </div>
+
+      <div class="btns">
+        <button id="btnCam">Камера</button>
+        <label class="filelabel">
+          Фото
+          <input id="file" type="file" accept="image/*" />
         </label>
-        <input type="range" id="conf-range" min="5" max="95" step="5" value="40">
+      </div>
+
+      <div class="status" id="status">Загрузка best.onnx...</div>
+
+      <div class="hint">
+        Если снова “наслаивает”, значит неверные ID. Поменяй personIds/ppeIds/noPpeIds.
+      </div>
     </div>
 
-    <div id="monitor">
+    <div class="main">
+      <div class="monitor">
         <video id="video" autoplay muted playsinline></video>
-        <canvas id="canvas"></canvas>
-    </div>
+        <canvas id="cv"></canvas>
+      </div>
 
-    <div class="controls">
-        <button class="btn btn-live" onclick="startCamera()">🎥 ВКЛЮЧИТЬ КАМЕРУ</button>
-        <label class="btn btn-photo" style="display:flex; align-items:center; justify-content:center;">
-            📁 ЗАГРУЗИТЬ ФОТО
-            <input type="file" id="file-input" accept="image/*">
-        </label>
-    </div>
-
-    <div class="stats">
-        <div class="stat-item" style="border-right: 2px solid #1e293b;">
-            <span style="color:#94a3b8; font-size: 0.8rem;">ЛЮДЕЙ В ЗАЩИТЕ</span>
-            <span id="count-safe" class="stat-val" style="color:var(--s)">0</span>
+      <div class="stats">
+        <div class="stat">
+          <div class="v ok" id="safe">0</div>
+          <div class="t">в защите</div>
         </div>
-        <div class="stat-item">
-            <span style="color:#94a3b8; font-size: 0.8rem;">ЛЮДЕЙ БЕЗ СИЗ</span>
-            <span id="count-bad" class="stat-val" style="color:var(--d)">0</span>
+        <div class="stat">
+          <div class="v bad" id="bad">0</div>
+          <div class="t">без сиз</div>
         </div>
+      </div>
     </div>
-</div>
+  </div>
 
 <script>
-    const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    const status = document.getElementById('status');
-    const confRange = document.getElementById('conf-range');
-    const confValLabel = document.getElementById('conf-val');
+  const statusEl = document.getElementById('status');
+  const thrEl = document.getElementById('thr');
+  const thrText = document.getElementById('thrText');
+  const personIdsEl = document.getElementById('personIds');
+  const ppeIdsEl = document.getElementById('ppeIds');
+  const noPpeIdsEl = document.getElementById('noPpeIds');
+  const fpsEl = document.getElementById('fps');
 
-    let session;
-    let isLive = false;
-    
-    // Стандартные названия классов. 
-    const labels = ["Helmet", "No-Helmet", "No-Vest", "Person", "Vest", "Head"];
+  const btnCam = document.getElementById('btnCam');
+  const fileEl = document.getElementById('file');
 
-    // 1. ЗАГРУЗКА
-    async function init() {
-        try {
-            session = await ort.InferenceSession.create('./best.onnx', { executionProviders: ['wasm'] });
-            status.innerText = "✅ МОДЕЛЬ ЗАГРУЖЕНА. ГОТОВ К РАБОТЕ.";
-            status.style.color = "#22c55e";
-        } catch (e) {
-            status.innerText = "❌ ОШИБКА: Файл best.onnx не найден!";
-            status.style.color = "#ef4444";
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('cv');
+  const ctx = canvas.getContext('2d');
+
+  const safeEl = document.getElementById('safe');
+  const badEl = document.getElementById('bad');
+
+  let session = null;
+  let live = false;
+  let lastFrameTime = 0;
+
+  function parseIds(str){
+    return str.split(',').map(s => s.trim()).filter(s => s.length).map(s => Number(s)).filter(n => Number.isFinite(n));
+  }
+
+  function sigmoid(x){ return 1 / (1 + Math.exp(-x)); }
+
+  // IoU for NMS
+  function iou(a,b){
+    const x1 = Math.max(a.x1,b.x1), y1 = Math.max(a.y1,b.y1);
+    const x2 = Math.min(a.x2,b.x2), y2 = Math.min(a.y2,b.y2);
+    const inter = Math.max(0,x2-x1)*Math.max(0,y2-y1);
+    const areaA = Math.max(0,a.x2-a.x1)*Math.max(0,a.y2-a.y1);
+    const areaB = Math.max(0,b.x2-b.x1)*Math.max(0,b.y2-b.y1);
+    const uni = areaA + areaB - inter;
+    return uni <= 0 ? 0 : inter/uni;
+  }
+
+  function nms(boxes, iouThr){
+    boxes.sort((a,b)=>b.score-a.score);
+    const out=[];
+    while(boxes.length){
+      const best = boxes.shift();
+      out.push(best);
+      boxes = boxes.filter(b => iou(best,b) < iouThr);
+    }
+    return out;
+  }
+
+  async function loadModel(){
+    try{
+      statusEl.textContent = "Загрузка best.onnx (локально из GitHub Pages)...";
+      session = await ort.InferenceSession.create('./best.onnx', {
+        executionProviders: ['wasm'],
+        graphOptimizationLevel: 'all'
+      });
+      statusEl.textContent = "Модель загружена. Можно запускать.";
+    }catch(e){
+      console.error(e);
+      statusEl.textContent = "Ошибка загрузки best.onnx. Проверь, что файл лежит рядом с index.html и GitHub Pages включен.";
+    }
+  }
+
+  function toTensorFromSource(source, size=640){
+    const off = document.createElement('canvas');
+    off.width=size; off.height=size;
+    const octx = off.getContext('2d');
+    octx.drawImage(source,0,0,size,size);
+    const img = octx.getImageData(0,0,size,size).data;
+
+    const chw = new Float32Array(3*size*size);
+    const area = size*size;
+    for(let i=0;i<area;i++){
+      chw[i] = img[i*4]/255;
+      chw[i+area] = img[i*4+1]/255;
+      chw[i+2*area] = img[i*4+2]/255;
+    }
+    return new ort.Tensor('float32', chw, [1,3,size,size]);
+  }
+
+  // универсальный разбор выхода YOLOv8: [1, C, A] или [1, A, C]
+  function decode(outputTensor, thr){
+    const data = outputTensor.data;
+    const dims = outputTensor.dims; // ex: [1, 9, 8400] or [1, 8400, 9]
+
+    const A = (dims[1] === 8400) ? dims[1] : dims[2];
+    const C = (dims[1] === 8400) ? dims[2] : dims[1]; // channels
+    const transposed = (dims[1] === 8400); // [1, A, C]
+
+    const numClasses = C - 4;
+    const dets = [];
+
+    // NOTE: многие onnx выходы уже "sigmoid", но некоторые - logits.
+    // сделаем авто: если видим значения > 1.5, применим sigmoid к score.
+    let sampleMax = 0;
+    for(let k=0;k<Math.min(2000, data.length);k++){
+      const v = Math.abs(data[k]);
+      if(v>sampleMax) sampleMax=v;
+    }
+    const needSigmoid = sampleMax > 1.5;
+
+    for(let i=0;i<A;i++){
+      let cx,cy,w,h;
+      if(transposed){
+        const base = i*C;
+        cx=data[base+0]; cy=data[base+1]; w=data[base+2]; h=data[base+3];
+        // class scores
+        let bestScore=-1, bestId=-1;
+        for(let c=0;c<numClasses;c++){
+          let s = data[base+4+c];
+          if(needSigmoid) s = sigmoid(s);
+          if(s>bestScore){bestScore=s; bestId=c;}
         }
-    }
-
-    // 2. КАМЕРА
-    async function startCamera() {
-        if (!session) return alert("Подождите загрузки модели!");
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-            video.srcObject = stream;
-            isLive = true;
-            video.onloadedmetadata = () => {
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                detectLoop();
-            };
-        } catch (e) { alert("Ошибка доступа к камере."); }
-    }
-
-    async function detectLoop() {
-        if (!isLive) return;
-        await runInference(video);
-        requestAnimationFrame(detectLoop);
-    }
-
-    // 3. ФОТО
-    document.getElementById('file-input').onchange = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        isLive = false;
-        if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
-        
-        status.innerText = "Анализ фотографии...";
-        status.style.color = "#38bdf8";
-
-        const img = new Image();
-        img.src = URL.createObjectURL(file);
-        img.onload = async () => {
-            canvas.width = img.width;
-            canvas.height = img.height;
-            await runInference(img);
-            status.innerText = "✅ АНАЛИЗ ЗАВЕРШЕН";
-            status.style.color = "#22c55e";
-        };
-    };
-
-    // 4. ДВИЖОК
-    async function runInference(source) {
-        if (!session) return;
-
-        const [w, h] = [640, 640];
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = w; tempCanvas.height = h;
-        const tCtx = tempCanvas.getContext('2d');
-        tCtx.drawImage(source, 0, 0, w, h);
-        const imgData = tCtx.getImageData(0, 0, w, h).data;
-
-        const input = new Float32Array(3 * w * h);
-        for (let i = 0; i < w * h; i++) {
-            input[i] = imgData[i * 4] / 255.0; 
-            input[i + w*h] = imgData[i * 4 + 1] / 255.0; 
-            input[i + 2*w*h] = imgData[i * 4 + 2] / 255.0; 
+        if(bestScore>=thr){
+          dets.push({cx,cy,w,h,score:bestScore,cls:bestId});
         }
-
-        const tensor = new ort.Tensor('float32', input, [1, 3, w, h]);
-        const outputs = await session.run({ [session.inputNames[0]]: tensor });
-        
-        parseAndDraw(outputs[session.outputNames[0]].data, outputs[session.outputNames[0]].dims, source);
-    }
-
-    // 5. УМНЫЙ ПАРСИНГ И ОТРИСОВКА (ИСПРАВЛЕНА ПРОБЛЕМА 100% и НАСЛОЕНИЙ)
-    function parseAndDraw(data, dims, source) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
-
-        const threshold = parseInt(confRange.value) / 100;
-        let rawBoxes = [];
-
-        // Автоматически определяем структуру матрицы от YOLO
-        const isTransposed = dims[1] === 8400;
-        const numAnchors = isTransposed ? dims[1] : dims[2];
-        const numElements = isTransposed ? dims[2] : dims[1];
-        const numClasses = numElements - 4;
-
-        // Достаем все рамки
-        for (let i = 0; i < numAnchors; i++) {
-            let maxProb = 0; let classId = -1;
-            let cx, cy, bw, bh;
-
-            if (isTransposed) {
-                cx = data[i * numElements + 0]; cy = data[i * numElements + 1];
-                bw = data[i * numElements + 2]; bh = data[i * numElements + 3];
-                for (let c = 0; c < numClasses; c++) {
-                    let prob = data[i * numElements + 4 + c];
-                    if (prob > maxProb) { maxProb = prob; classId = c; }
-                }
-            } else {
-                cx = data[0 * numAnchors + i]; cy = data[1 * numAnchors + i];
-                bw = data[2 * numAnchors + i]; bh = data[3 * numAnchors + i];
-                for (let c = 0; c < numClasses; c++) {
-                    let prob = data[(4 + c) * numAnchors + i];
-                    if (prob > maxProb) { maxProb = prob; classId = c; }
-                }
-            }
-
-            // ФИЛЬТР ПОЛЗУНКА РАБОТАЕТ ТУТ
-            if (maxProb > threshold) {
-                let x = (cx - bw / 2) * (canvas.width / 640);
-                let y = (cy - bh / 2) * (canvas.height / 640);
-                let w = bw * (canvas.width / 640);
-                let h = bh * (canvas.height / 640);
-                rawBoxes.push({ x, y, w, h, prob: maxProb, classId });
-            }
+      } else {
+        // [1, C, A] packed by channel
+        cx=data[0*A+i]; cy=data[1*A+i]; w=data[2*A+i]; h=data[3*A+i];
+        let bestScore=-1, bestId=-1;
+        for(let c=0;c<numClasses;c++){
+          let s = data[(4+c)*A + i];
+          if(needSigmoid) s = sigmoid(s);
+          if(s>bestScore){bestScore=s; bestId=c;}
         }
-
-        // ШАГ 1: NMS (Удаляем дубликаты одного и того же объекта)
-        rawBoxes.sort((a, b) => b.prob - a.prob);
-        let cleanBoxes = [];
-        while (rawBoxes.length > 0) {
-            let best = rawBoxes.shift();
-            cleanBoxes.push(best);
-            rawBoxes = rawBoxes.filter(box => iou(best, box) < 0.4);
+        if(bestScore>=thr){
+          dets.push({cx,cy,w,h,score:bestScore,cls:bestId});
         }
-
-        // ШАГ 2: ГРУППИРОВКА РАМОК ПО ЛЮДЯМ (РЕШЕНИЕ ТВОЕЙ ПРОБЛЕМЫ)
-        let people = [];
-        let items = [];
-
-        cleanBoxes.forEach(b => {
-            let name = labels[b.classId] ? labels[b.classId].toLowerCase() : "";
-            if (name.includes("person") || name === "human") {
-                people.push(b);
-            } else {
-                items.push({...b, name: name, used: false});
-            }
-        });
-
-        let safeCount = 0;
-        let badCount = 0;
-
-        // Проверяем каждого найденного человека
-        people.forEach(p => {
-            let isSafe = false;
-            let isDanger = false;
-            let pCenterX = p.x + p.w/2;
-            let pCenterY = p.y + p.h/2;
-
-            // Ищем каску или жилет внутри этого человека
-            items.forEach(item => {
-                let iCenterX = item.x + item.w/2;
-                let iCenterY = item.y + item.h/2;
-
-                // Если центр СИЗ находится внутри рамки человека
-                if (iCenterX > p.x && iCenterX < p.x + p.w && iCenterY > p.y && iCenterY < p.y + p.h) {
-                    item.used = true; // Отмечаем, что этот предмет принадлежит этому человеку
-                    if (item.name.includes("no-")) isDanger = true;
-                    else if (item.name.includes("helmet") || item.name.includes("vest")) isSafe = true;
-                }
-            });
-
-            // Выносим вердикт: ОДИН человек = ОДНА рамка
-            let status = "";
-            let color = "";
-            
-            if (isDanger) {
-                status = "БЕЗ СИЗ"; color = "#ef4444"; badCount++;
-            } else if (isSafe) {
-                status = "В ЗАЩИТЕ"; color = "#22c55e"; safeCount++;
-            } else {
-                // Если нейросеть вообще не нашла на нем ни каски, ни "no-helmet"
-                status = "БЕЗ СИЗ"; color = "#ef4444"; badCount++;
-            }
-
-            // Рисуем одну финальную рамку на человека
-            ctx.strokeStyle = color; ctx.lineWidth = 4;
-            ctx.strokeRect(p.x, p.y, p.w, p.h);
-            ctx.fillStyle = color; ctx.fillRect(p.x, p.y > 25 ? p.y - 25 : 0, p.w + 20, 25);
-            ctx.fillStyle = "white"; ctx.font = "bold 14px Arial";
-            ctx.fillText(`${status} (${Math.round(p.prob*100)}%)`, p.x + 5, p.y > 25 ? p.y - 7 : 18);
-        });
-
-        // Шаг 3: Если каска просто лежит на столе (без человека), рисуем её отдельно
-        items.forEach(item => {
-            if (!item.used) {
-                let isDanger = item.name.includes("no-");
-                let color = isDanger ? "#ef4444" : "#22c55e";
-                let text = isDanger ? "НАРУШЕНИЕ" : "СИЗ";
-                if (isDanger) badCount++; else safeCount++;
-
-                ctx.strokeStyle = color; ctx.lineWidth = 3;
-                ctx.strokeRect(item.x, item.y, item.w, item.h);
-                ctx.fillStyle = color; ctx.font = "bold 12px Arial";
-                ctx.fillText(`${text} ${Math.round(item.prob*100)}%`, item.x, item.y - 5);
-            }
-        });
-
-        // Обновляем статистику
-        document.getElementById('count-safe').innerText = safeCount;
-        document.getElementById('count-bad').innerText = badCount;
+      }
     }
+    return dets;
+  }
 
-    function iou(b1, b2) {
-        let x1 = Math.max(b1.x, b2.x), y1 = Math.max(b1.y, b2.y);
-        let x2 = Math.min(b1.x + b1.w, b2.x + b2.w), y2 = Math.min(b1.y + b1.h, b2.y + b2.h);
-        let inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
-        let union = b1.w * b1.h + b2.w * b2.h - inter;
-        return inter / union;
-    }
+  function drawPeopleStatus(source, dets){
+    // отрисовка: только PERSON рамки, статус по PPE
+    canvas.width = source.videoWidth || source.width;
+    canvas.height = source.videoHeight || source.height;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.drawImage(source,0,0,canvas.width,canvas.height);
 
-    confRange.addEventListener('input', (e) => {
-        confValLabel.innerText = e.target.value + '%';
-        // Если фото уже загружено, перерисовываем его с новой чувствительностью сразу
-        if (!isLive && document.getElementById('file-input').files[0]) {
-            runInference(canvas); 
-        }
+    const personIds = parseIds(personIdsEl.value);
+    const ppeIds = parseIds(ppeIdsEl.value);
+    const noPpeIds = parseIds(noPpeIdsEl.value);
+
+    // scale from 640 model space -> canvas space
+    const sx = canvas.width / 640;
+    const sy = canvas.height / 640;
+
+    // convert to xyxy boxes
+    const all = dets.map(d => {
+      const x1 = (d.cx - d.w/2)*sx;
+      const y1 = (d.cy - d.h/2)*sy;
+      const x2 = (d.cx + d.w/2)*sx;
+      const y2 = (d.cy + d.h/2)*sy;
+      return {x1,y1,x2,y2,score:d.score,cls:d.cls};
     });
 
-    init();
+    // separate by class groups
+    const personsRaw = all.filter(b => personIds.includes(b.cls));
+    const ppeRaw = all.filter(b => ppeIds.includes(b.cls));
+    const noPpeRaw = all.filter(b => noPpeIds.includes(b.cls));
+
+    // NMS only for persons to guarantee 1 box per person
+    const persons = nms(personsRaw, 0.45);
+
+    let safe=0, bad=0;
+
+    for(const p of persons){
+      // status: if any NO-PPE inside person => bad
+      // else if any PPE inside => safe
+      // else => bad (нет данных о защите)
+      const inside = (b) => {
+        const cx = (b.x1+b.x2)/2;
+        const cy = (b.y1+b.y2)/2;
+        return (cx>p.x1 && cx<p.x2 && cy>p.y1 && cy<p.y2);
+      };
+
+      const hasNo = noPpeRaw.some(inside);
+      const hasPpe = ppeRaw.some(inside);
+
+      const isSafe = (!hasNo && hasPpe);
+      if(isSafe) safe++; else bad++;
+
+      const color = isSafe ? getComputedStyle(document.documentElement).getPropertyValue('--ok').trim()
+                           : getComputedStyle(document.documentElement).getPropertyValue('--bad').trim();
+      const text = isSafe ? "В ЗАЩИТЕ" : "БЕЗ СИЗ";
+
+      // draw person box ONCE
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 4;
+      ctx.strokeRect(p.x1, p.y1, p.x2-p.x1, p.y2-p.y1);
+
+      // head highlight if bad
+      if(!isSafe){
+        const headH = (p.y2-p.y1)*0.25;
+        ctx.fillStyle = "rgba(239,68,68,0.25)";
+        ctx.fillRect(p.x1, p.y1, p.x2-p.x1, headH);
+      }
+
+      // label
+      ctx.fillStyle = color;
+      ctx.fillRect(p.x1, Math.max(0,p.y1-26), Math.min(260, (p.x2-p.x1)), 26);
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 14px system-ui";
+      ctx.fillText(text, p.x1+6, Math.max(18,p.y1-8));
+    }
+
+    safeEl.textContent = safe;
+    badEl.textContent = bad;
+  }
+
+  async function run(source){
+    if(!session) return;
+    const thr = Number(thrEl.value)/100;
+    const input = toTensorFromSource(source, 640);
+    const feeds = {[session.inputNames[0]]: input};
+    const out = await session.run(feeds);
+    const outTensor = out[session.outputNames[0]];
+    const dets = decode(outTensor, thr);
+    drawPeopleStatus(source, dets);
+  }
+
+  // UI: threshold text
+  const thrEl = document.getElementById('thr');
+  thrEl.addEventListener('input', ()=>{
+    thrText.textContent = `${thrEl.value}%`;
+  });
+  // init threshold text
+  const thrText = document.getElementById('thrText');
+  thrText.textContent = `${thrEl.value}%`;
+
+  // camera
+  btnCam.addEventListener('click', async ()=>{
+    if(!session) return;
+    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+    video.srcObject = stream;
+    video.style.display = "block";
+    live = true;
+    video.onloadedmetadata = ()=>{
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      statusEl.textContent = "Камера активна. ИИ работает.";
+      requestAnimationFrame(loop);
+    };
+  });
+
+  async function loop(ts){
+    if(!live) return;
+    const fpsLimit = Math.max(1, Math.min(30, Number(fpsEl.value)||10));
+    const minDt = 1000 / fpsLimit;
+    if(ts - lastFrameTime >= minDt){
+      lastFrameTime = ts;
+      try{ await run(video); } catch(e){ console.error(e); statusEl.textContent="Ошибка инференса (см. Console)"; }
+    }
+    requestAnimationFrame(loop);
+  }
+
+  // file
+  fileEl.addEventListener('change', async (e)=>{
+    const f = e.target.files[0];
+    if(!f) return;
+    live = false;
+    if(video.srcObject) video.srcObject.getTracks().forEach(t=>t.stop());
+    const img = new Image();
+    img.src = URL.createObjectURL(f);
+    img.onload = async ()=>{
+      statusEl.textContent = "Анализ фото...";
+      await run(img);
+      statusEl.textContent = "Готово.";
+    }
+  });
+
+  // show percent on slider
+  thrEl.addEventListener('input', ()=>{ thrText.textContent = `${thrEl.value}%`; });
+
+  loadModel();
 </script>
 </body>
 </html>
