@@ -1,8 +1,8 @@
-ultralytics
-streamlit
-onnxruntime
-opencv-python-headless
-pillow
-numpy
-streamlit-webrtc
-av
+streamlit==1.41.1
+numpy==1.26.4
+pillow==10.4.0
+opencv-python-headless==4.10.0.84
+onnxruntime==1.17.3
+
+streamlit-webrtc==0.47.7
+av==11.0.0
