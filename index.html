@@ -3,15 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SafeGuard ИИ | Поиск СИЗ</title>
-    <!-- Движок ONNX -->
+    <title>SafeGuard ИИ | Контроль СИЗ</title>
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
     <style>
-        :root { --p: #3b82f6; --bg: #0f172a; --card: #1e293b; --s: #22c55e; }
+        :root { --p: #3b82f6; --bg: #0f172a; --card: #1e293b; --s: #22c55e; --d: #ef4444; }
         body { font-family: 'Segoe UI', Tahoma, sans-serif; background: var(--bg); color: white; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
         .container { width: 100%; max-width: 900px; background: var(--card); padding: 25px; border-radius: 20px; box-shadow: 0 15px 40px rgba(0,0,0,0.5); }
-        h1 { color: var(--p); margin: 0 0 5px; text-align: center; }
-        p.subtitle { text-align: center; color: #94a3b8; font-size: 0.9rem; margin-bottom: 20px; }
+        h1 { color: var(--p); margin: 0 0 15px; text-align: center; }
         
         #monitor { position: relative; width: 100%; background: #000; border-radius: 12px; overflow: hidden; border: 2px solid #334155; display: flex; justify-content: center; align-items: center; min-height: 480px; }
         canvas { max-width: 100%; max-height: 600px; display: block; }
@@ -27,9 +25,9 @@
         .settings label { display: flex; justify-content: space-between; font-size: 0.9rem; margin-bottom: 10px; }
         input[type=range] { width: 100%; cursor: pointer; }
 
-        .stats { background: #0f172a; padding: 20px; border-radius: 12px; margin-top: 10px; text-align: center; border: 2px solid var(--s); }
-        .stat-val { font-size: 3rem; font-weight: bold; color: var(--s); display: block; }
-        .stat-label { color: #94a3b8; font-size: 1rem; text-transform: uppercase; letter-spacing: 2px; }
+        .stats { display: flex; justify-content: space-around; background: #0f172a; padding: 15px; border-radius: 12px; margin-top: 10px; }
+        .stat-item { text-align: center; flex: 1; }
+        .stat-val { display: block; font-size: 2rem; font-weight: bold; }
         
         #status { text-align: center; color: #38bdf8; font-weight: bold; margin-bottom: 10px; }
         input[type="file"] { display: none; }
@@ -38,17 +36,15 @@
 <body>
 
 <div class="container">
-    <h1>🛡️ SafeGuard ИИ v7.1</h1>
-    <p class="subtitle">Режим: Поиск защитных касок и жилетов</p>
-    
+    <h1>🛡️ SafeGuard ИИ v7.2</h1>
     <div id="status">Загрузка файла best.onnx...</div>
 
     <div class="settings">
         <label>
             <span>Чувствительность ИИ:</span>
-            <span id="conf-val" style="color:var(--p); font-weight:bold;">30%</span>
+            <span id="conf-val" style="color:var(--p); font-weight:bold;">40%</span>
         </label>
-        <input type="range" id="conf-range" min="10" max="90" step="5" value="30">
+        <input type="range" id="conf-range" min="10" max="90" step="5" value="40">
     </div>
 
     <div id="monitor">
@@ -65,8 +61,14 @@
     </div>
 
     <div class="stats">
-        <span class="stat-label">Найдено элементов защиты</span>
-        <span id="count-safe" class="stat-val">0</span>
+        <div class="stat-item" style="border-right: 2px solid #1e293b;">
+            <span style="color:#94a3b8; font-size: 0.8rem;">С СИЗ (ЗАЩИТА)</span>
+            <span id="count-safe" class="stat-val" style="color:var(--s)">0</span>
+        </div>
+        <div class="stat-item">
+            <span style="color:#94a3b8; font-size: 0.8rem;">БЕЗ СИЗ (НАРУШИТЕЛИ)</span>
+            <span id="count-bad" class="stat-val" style="color:var(--d)">0</span>
+        </div>
     </div>
 </div>
 
@@ -81,6 +83,7 @@
     let session;
     let isLive = false;
     
+    // Стандартные классы YOLOv8 для строительной площадки
     const labels = ["Helmet", "No-Helmet", "No-Vest", "Person", "Vest", "Head"];
 
     // 1. ЗАГРУЗКА
@@ -155,9 +158,9 @@
 
         const input = new Float32Array(3 * w * h);
         for (let i = 0; i < w * h; i++) {
-            input[i] = imgData[i * 4] / 255.0; 
-            input[i + w*h] = imgData[i * 4 + 1] / 255.0; 
-            input[i + 2*w*h] = imgData[i * 4 + 2] / 255.0; 
+            input[i] = imgData[i * 4] / 255.0; // R
+            input[i + w*h] = imgData[i * 4 + 1] / 255.0; // G
+            input[i + 2*w*h] = imgData[i * 4 + 2] / 255.0; // B
         }
 
         const tensor = new ort.Tensor('float32', input, [1, 3, w, h]);
@@ -167,17 +170,18 @@
         parseAndDraw(output.data, output.dims, source);
     }
 
-    // 5. ОТРИСОВКА (ТОЛЬКО СИЗ)
+    // 5. ОТРИСОВКА И NMS (ФИЛЬТР ДУБЛИКАТОВ)
     function parseAndDraw(data, dims, source) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
 
         const threshold = parseInt(confRange.value) / 100;
-        let boxes = [];
+        let rawBoxes = [];
 
         let numAnchors = dims[2]; 
         let numClasses = dims[1] - 4; 
 
+        // Сбор ВСЕХ возможных рамок
         for (let i = 0; i < numAnchors; i++) {
             let maxProb = 0;
             let classId = -1;
@@ -199,48 +203,62 @@
                 let w = bw * (canvas.width / 640);
                 let h = bh * (canvas.height / 640);
 
-                boxes.push({ x, y, w, h, prob: maxProb, classId });
+                rawBoxes.push({ x, y, w, h, prob: maxProb, classId });
             }
         }
 
-        boxes.sort((a, b) => b.prob - a.prob);
+        // АЛГОРИТМ NMS (УБИРАЕТ НАЛОЖЕНИЕ РАМОК В ОДНОМ МЕСТЕ)
+        rawBoxes.sort((a, b) => b.prob - a.prob);
         const finalBoxes = [];
-        while (boxes.length > 0) {
-            const best = boxes.shift();
+
+        while (rawBoxes.length > 0) {
+            const best = rawBoxes.shift(); // Берем самую уверенную рамку
             finalBoxes.push(best);
-            boxes = boxes.filter(box => iou(best, box) < 0.45);
+            
+            // Удаляем все остальные рамки, которые лежат в этом же месте (IoU > 0.3)
+            // Независимо от того, какого они класса! (Это решает проблему дубликатов на 1 голове)
+            rawBoxes = rawBoxes.filter(box => iou(best, box) < 0.3);
         }
 
-        let ppeCount = 0;
+        // СЧЕТЧИКИ И ОТРИСОВКА
+        let safeCount = 0;
+        let badCount = 0;
 
         finalBoxes.forEach(box => {
-            const labelName = labels[box.classId] ? labels[box.classId] : "";
+            const labelName = labels[box.classId] ? labels[box.classId] : `Объект`;
             const labelLower = labelName.toLowerCase();
             
-            // ФИЛЬТР: ЕСЛИ ЭТО НЕ КАСКА И НЕ ЖИЛЕТ - ПРОПУСКАЕМ (Игнорируем "no-helmet", "person" и т.д.)
-            if (!labelLower.includes("helmet") && !labelLower.includes("vest")) return;
-            if (labelLower.includes("no-")) return; // Если есть приставка "no-", тоже пропускаем
+            // Если это огромная рамка человека - игнорируем ее, чтобы не захламлять экран
+            if (labelLower === "person" || labelLower === "human") return;
 
-            ppeCount++;
+            // Логика цвета: Если в имени есть "no-" (например no-helmet) -> Красный
+            const isBad = labelLower.includes("no");
+            const color = isBad ? "#ef4444" : "#22c55e"; 
+            const text = isBad ? "НАРУШИТЕЛЬ" : "В ЗАЩИТЕ";
             
-            const color = "#22c55e"; // Только зеленый цвет
-            const text = labelLower.includes("helmet") ? "КАСКА" : "ЖИЛЕТ";
+            if (isBad) badCount++; else safeCount++;
 
+            // Рисуем рамку
             ctx.strokeStyle = color;
             ctx.lineWidth = 4;
             ctx.strokeRect(box.x, box.y, box.w, box.h);
 
+            // Рисуем плашку для текста
             ctx.fillStyle = color;
             ctx.fillRect(box.x, box.y > 25 ? box.y - 25 : 0, box.w, 25);
             
+            // Пишем текст
             ctx.fillStyle = "white";
             ctx.font = "bold 14px Arial";
-            ctx.fillText(`${text} ${Math.round(box.prob * 100)}%`, box.x + 5, box.y > 25 ? box.y - 7 : 18);
+            ctx.fillText(`${text} (${Math.round(box.prob * 100)}%)`, box.x + 5, box.y > 25 ? box.y - 7 : 18);
         });
 
-        document.getElementById('count-safe').innerText = ppeCount;
+        // Обновляем статистику
+        document.getElementById('count-safe').innerText = safeCount;
+        document.getElementById('count-bad').innerText = badCount;
     }
 
+    // Функция вычисления площади пересечения рамок (IoU)
     function iou(b1, b2) {
         const x1 = Math.max(b1.x, b2.x), y1 = Math.max(b1.y, b2.y);
         const x2 = Math.min(b1.x + b1.w, b2.x + b2.w), y2 = Math.min(b1.y + b1.h, b2.y + b2.h);
