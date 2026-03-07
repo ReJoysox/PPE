@@ -3,184 +3,60 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SafeGuard ИИ | Система контроля СИЗ</title>
-    <!-- Подключаем ядро нейросети (работает через CDN) -->
-    <script src="https://cdn.roboflow.com/0.2.26/roboflow.js"></script>
+    <title>SafeGuard Pro | YOLOv8 ONNX</title>
+    <!-- Подключаем библиотеки для работы с ONNX и графикой -->
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/opencv-4-nodes/opencv.js"></script>
     <style>
         :root { --p: #3b82f6; --bg: #0f172a; --c: #1e293b; --s: #22c55e; --d: #ef4444; }
-        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: white; margin: 0; padding: 10px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
-        
-        .card { width: 100%; max-width: 800px; background: var(--c); padding: 25px; border-radius: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); margin-top: 10px; text-align: center; }
-        h1 { color: var(--p); margin: 0 0 10px 0; font-size: 1.5rem; }
-        
-        /* Экран монитора */
-        #monitor { position: relative; width: 100%; aspect-ratio: 4/3; background: #000; border-radius: 15px; overflow: hidden; border: 2px solid #334155; }
+        body { font-family: sans-serif; background: var(--bg); color: white; margin: 0; padding: 20px; text-align: center; }
+        .container { max-width: 1000px; margin: auto; background: var(--c); padding: 30px; border-radius: 25px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+        h1 { color: var(--p); margin-top: 0; }
+        #monitor-wrapper { position: relative; width: 640px; height: 480px; background: #000; border-radius: 15px; overflow: hidden; border: 3px solid #334155; margin: 20px auto; }
         video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; }
-        
-        .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 20px 0; }
-        .btn { padding: 15px; border: none; border-radius: 10px; font-weight: bold; color: white; cursor: pointer; transition: 0.3s; }
-        .btn-live { background: var(--p); }
-        .btn-photo { background: #8b5cf6; }
-        .btn:hover { opacity: 0.8; transform: scale(0.98); }
-        
-        #status-bar { padding: 12px; background: #334155; border-radius: 10px; font-weight: bold; margin-bottom: 15px; color: #38bdf8; font-size: 0.9rem; }
-        .error-msg { color: var(--d); background: rgba(239, 68, 68, 0.1); padding: 10px; border-radius: 8px; display: none; margin-bottom: 10px; border: 1px solid var(--d); }
-        
-        .stats { display: flex; justify-content: space-around; background: #0f172a; padding: 15px; border-radius: 12px; }
-        .stat-val { display: block; font-size: 1.5rem; font-weight: bold; }
+        .controls { display: flex; gap: 15px; justify-content: center; margin-bottom: 20px; }
+        .btn { padding: 15px 25px; background: var(--p); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; }
+        #status { padding: 10px; background: #334155; border-radius: 10px; font-weight: bold; color: #38bdf8; }
         input[type="file"] { display: none; }
     </style>
 </head>
 <body>
 
-<div class="card">
-    <h1>🛡️ SafeGuard ИИ <small style="opacity:0.5; font-size:0.6em">v6.0</small></h1>
-    
-    <!-- Сюда выведем текст ошибки, если она будет -->
-    <div id="error-display" class="error-msg"></div>
-    
-    <div id="status-bar">Загрузка интеллектуального ядра...</div>
+<div class="container">
+    <h1>🛡️ SafeGuard Pro: ONNX Engine</h1>
+    <div id="status">Загрузка модели best.onnx...</div>
 
-    <div id="monitor">
+    <div id="monitor-wrapper">
         <video id="video" autoplay muted playsinline style="display:none"></video>
         <canvas id="canvas"></canvas>
     </div>
 
     <div class="controls">
-        <button class="btn btn-live" onclick="startCamera()">🎥 ЖИВОЙ ЭФИР</button>
-        <label class="btn btn-photo" style="display: flex; align-items: center; justify-content: center; cursor: pointer;">
-            📁 АНАЛИЗ ФОТО
-            <input type="file" accept="image/*" onchange="processImage(event)">
+        <button class="btn" onclick="startCamera()">🎥 ЖИВОЙ ЭФИР</button>
+        <label class="btn" style="background: #8b5cf6; cursor: pointer;">
+            📁 АНАЛИЗ ФОТО <input type="file" accept="image/*" onchange="handleImage(event)">
         </label>
     </div>
-
-    <div class="stats">
-        <div style="color:var(--s)">В ЗАЩИТЕ: <span id="count-safe" class="stat-val">0</span></div>
-        <div style="color:var(--d)">НАРУШЕНИЙ: <span id="count-bad" class="stat-val">0</span></div>
+    
+    <div style="font-size: 0.8rem; color: #64748b;">
+        Движок: ONNX Runtime Web | Модель: YOLOv8
     </div>
 </div>
 
 <script>
-    // ПРОВЕРЕННЫЙ КЛЮЧ И МОДЕЛЬ
-    const API_KEY = "rf_LKryTgEjdCbkT8neRDfLFtdPHzj2";
-    const MODEL_NAME = "construction-site-safety";
-    const VERSION = 4;
-
-    const video = document.getElementById('video');
+    const status = document.getElementById('status');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
-    const status = document.getElementById('status-bar');
-    const errorDisplay = document.getElementById('error-display');
-
-    let model = null;
+    const video = document.getElementById('video');
+    
+    let session;
     let isLive = false;
 
-    // 1. ЗАГРУЗКА ИИ
+    // Список классов (YOLOv8 обычно имеет такой порядок для PPE)
+    // Если у тебя другой порядок - просто переставь их тут
+    const labels = ["Helmet", "No-Helmet", "No-Vest", "Person", "Vest"];
+
+    // 1. Загрузка модели
     async function init() {
         try {
-            // Проверка протокола
-            if (window.location.protocol === 'file:') {
-                throw new Error("Запустите через GitHub Pages! (file:// заблокирован)");
-            }
-
-            status.innerText = "Авторизация в Roboflow...";
-            roboflow.auth({ publishable_key: API_KEY });
-            
-            status.innerText = "Скачивание весов YOLOv8...";
-            model = await roboflow.load({ model: MODEL_NAME, version: VERSION });
-            
-            status.innerText = "СИСТЕМА ГОТОВА К РАБОТЕ";
-            status.style.color = "#22c55e";
-        } catch (e) {
-            console.error(e);
-            errorDisplay.innerText = "ОШИБКА: " + e.message;
-            errorDisplay.style.display = "block";
-            status.innerText = "ОШИБКА ЗАГРУЗКИ";
-            status.style.color = "#ef4444";
-        }
-    }
-
-    // 2. ЗАПУСК КАМЕРЫ
-    async function startCamera() {
-        if (!model) return alert("Дождитесь загрузки ИИ!");
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ 
-                video: { facingMode: "environment" } 
-            });
-            video.srcObject = stream;
-            video.style.display = "block";
-            isLive = true;
-            status.innerText = "АКТИВЕН МОНИТОРИНГ КАМЕРЫ";
-            detectFrame();
-        } catch (err) {
-            errorDisplay.innerText = "ОШИБКА КАМЕРЫ: " + err.message;
-            errorDisplay.style.display = "block";
-        }
-    }
-
-    async function detectFrame() {
-        if (!isLive) return;
-        const predictions = await model.detect(video);
-        render(predictions, video);
-        requestAnimationFrame(detectFrame);
-    }
-
-    // 3. ОБРАБОТКА ФОТО
-    function processImage(event) {
-        const file = event.target.files[0];
-        if (!file || !model) return;
-        isLive = false;
-        video.style.display = "none";
-        status.innerText = "АНАЛИЗ ЗАГРУЖЕННОГО СНИМКА...";
-        
-        const img = new Image();
-        img.src = URL.createObjectURL(file);
-        img.onload = async () => {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            const predictions = await model.detect(img);
-            render(predictions, img);
-            status.innerText = "АНАЛИЗ ФОТО ЗАВЕРШЕН";
-        };
-    }
-
-    // 4. ОТРИСОВКА (ЛОГИКА БЕЗОПАСНОСТИ)
-    function render(predictions, source) {
-        if (isLive) {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
-        }
-
-        let safe = 0; let bad = 0;
-        const CONF_LIMIT = 0.65; // Фильтр шапок
-
-        predictions.forEach(p => {
-            if (p.confidence > CONF_LIMIT) {
-                const label = p.class.toLowerCase();
-                const isViolation = label.includes("no-") || label === "person";
-                let color = isViolation ? "#ef4444" : "#22c55e";
-                
-                if (isViolation) bad++; else safe++;
-
-                // Рисуем рамку
-                ctx.strokeStyle = color;
-                ctx.lineWidth = 4;
-                ctx.strokeRect(p.x - p.width/2, p.y - p.height/2, p.width, p.height);
-
-                // Плашка с текстом
-                ctx.fillStyle = color;
-                ctx.fillRect(p.x - p.width/2, p.y - p.height/2 - 25, p.width, 25);
-                ctx.fillStyle = "white";
-                ctx.font = "bold 14px Arial";
-                ctx.fillText(p.class.toUpperCase(), p.x - p.width/2 + 5, p.y - p.height/2 - 7);
-            }
-        });
-
-        document.getElementById('count-safe').innerText = safe;
-        document.getElementById('count-bad').innerText = bad;
-    }
-
-    init();
-</script>
-</body>
-</html>
+            // Создаем сессию 
