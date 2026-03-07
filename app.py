@@ -3,7 +3,259 @@ from ultralytics import YOLO
 from PIL import Image
 import cv2
 import numpy as np
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
+from streamlit_webrtc import webrtc_streamer, Vid<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafeGuard ИИ | Контроль СИЗ</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <style>
+        :root { --p: #3b82f6; --bg: #0f172a; --card: #1e293b; --s: #22c55e; --d: #ef4444; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: white; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        .container { width: 100%; max-width: 900px; background: var(--card); padding: 25px; border-radius: 20px; box-shadow: 0 15px 40px rgba(0,0,0,0.5); }
+        h1 { color: var(--p); margin: 0 0 10px 0; text-align: center; }
+        
+        #monitor { position: relative; width: 100%; background: #000; border-radius: 15px; overflow: hidden; border: 3px solid #334155; display: flex; justify-content: center; align-items: center; min-height: 480px; }
+        canvas { max-width: 100%; max-height: 600px; display: block; }
+        video { display: none; }
+
+        .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 20px 0; }
+        .btn { padding: 15px; border: none; border-radius: 10px; font-weight: bold; color: white; cursor: pointer; transition: 0.3s; }
+        .btn-live { background: var(--p); }
+        .btn-photo { background: #8b5cf6; text-align: center; }
+        .btn:hover { opacity: 0.8; transform: translateY(-2px); }
+
+        .settings { background: #0f172a; padding: 15px; border-radius: 10px; margin-bottom: 20px; }
+        .settings label { display: flex; justify-content: space-between; font-size: 0.9rem; margin-bottom: 10px; }
+        input[type=range] { width: 100%; cursor: pointer; }
+
+        .stats { display: flex; justify-content: space-around; background: #0f172a; padding: 15px; border-radius: 12px; margin-top: 10px; }
+        .stat-item { text-align: center; flex: 1; }
+        .stat-val { display: block; font-size: 2.2rem; font-weight: bold; }
+        
+        #status { text-align: center; color: #38bdf8; font-weight: bold; margin-bottom: 10px; }
+        input[type="file"] { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🛡️ SafeGuard ИИ v8.0</h1>
+    <div id="status">Загрузка модели best.onnx...</div>
+
+    <div class="settings">
+        <label>
+            <span>Чувствительность ИИ:</span>
+            <span id="conf-val" style="color:var(--p); font-weight:bold;">30%</span>
+        </label>
+        <input type="range" id="conf-range" min="10" max="90" step="5" value="30">
+    </div>
+
+    <div id="monitor">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <div class="controls">
+        <button class="btn btn-live" onclick="startCamera()">🎥 ЖИВОЙ ЭФИР</button>
+        <label class="btn btn-photo" style="display:flex; align-items:center; justify-content:center;">
+            📁 АНАЛИЗ ФОТО
+            <input type="file" id="file-input" accept="image/*">
+        </label>
+    </div>
+
+    <div class="stats">
+        <div class="stat-item" style="border-right: 2px solid #1e293b;">
+            <span style="color:#94a3b8; font-size: 0.8rem;">С СИЗ</span>
+            <span id="count-safe" class="stat-val" style="color:var(--s)">0</span>
+        </div>
+        <div class="stat-item">
+            <span style="color:#94a3b8; font-size: 0.8rem;">БЕЗ СИЗ</span>
+            <span id="count-bad" class="stat-val" style="color:var(--d)">0</span>
+        </div>
+    </div>
+</div>
+
+<script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const status = document.getElementById('status');
+    const confRange = document.getElementById('conf-range');
+    const confValLabel = document.getElementById('conf-val');
+
+    let session;
+    let isLive = false;
+    let labels = ["Helmet", "No-Helmet", "No-Vest", "Person", "Vest"];
+
+    // 1. ЗАГРУЗКА МОДЕЛИ
+    async function init() {
+        try {
+            session = await ort.InferenceSession.create('./best.onnx', { executionProviders: ['wasm'] });
+            status.innerText = "✅ МОДЕЛЬ ЗАГРУЖЕНА. ГОТОВ К РАБОТЕ.";
+            status.style.color = "#22c55e";
+        } catch (e) {
+            status.innerText = "❌ ОШИБКА: Файл best.onnx не найден в папке!";
+            status.style.color = "#ef4444";
+        }
+    }
+
+    // 2. КАМЕРА
+    async function startCamera() {
+        if (!session) return;
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        video.srcObject = stream;
+        isLive = true;
+        video.onloadedmetadata = () => {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            detectLoop();
+        };
+    }
+
+    async function detectLoop() {
+        if (!isLive) return;
+        await runInference(video);
+        requestAnimationFrame(detectLoop);
+    }
+
+    // 3. ФОТО
+    document.getElementById('file-input').onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        isLive = false;
+        if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
+        
+        const img = new Image();
+        img.src = URL.createObjectURL(file);
+        img.onload = async () => {
+            canvas.width = img.width;
+            canvas.height = img.height;
+            await runInference(img);
+        };
+    };
+
+    function sigmoid(x) {
+        return 1 / (1 + Math.exp(-x));
+    }
+
+    // 4. ГЛАВНЫЙ ДВИЖОК
+    async function runInference(source) {
+        if (!session) return;
+
+        const [w, h] = [640, 640];
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = w; tempCanvas.height = h;
+        const tCtx = tempCanvas.getContext('2d');
+        tCtx.drawImage(source, 0, 0, w, h);
+        const imgData = tCtx.getImageData(0, 0, w, h).data;
+
+        const input = new Float32Array(3 * w * h);
+        for (let i = 0; i < w * h; i++) {
+            input[i] = imgData[i * 4] / 255.0; 
+            input[i + w*h] = imgData[i * 4 + 1] / 255.0; 
+            input[i + 2*w*h] = imgData[i * 4 + 2] / 255.0; 
+        }
+
+        const tensor = new ort.Tensor('float32', input, [1, 3, w, h]);
+        const outputs = await session.run({ [session.inputNames[0]]: tensor });
+        const output = outputs[session.outputNames[0]];
+
+        parseAndDraw(output.data, output.dims, source);
+    }
+
+    function parseAndDraw(data, dims, source) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+
+        const threshold = parseInt(confRange.value) / 100;
+        let detections = [];
+
+        let numAnchors = dims[2];
+        let numClasses = dims[1] - 4;
+
+        for (let i = 0; i < numAnchors; i++) {
+            let maxProb = 0;
+            let classId = -1;
+
+            for (let c = 0; c < numClasses; c++) {
+                let raw_val = data[(4 + c) * numAnchors + i];
+                let prob = sigmoid(raw_val);
+                if (prob > maxProb) { maxProb = prob; classId = c; }
+            }
+
+            if (maxProb > threshold) {
+                let cx = data[0 * numAnchors + i];
+                let cy = data[1 * numAnchors + i];
+                let bw = data[2 * numAnchors + i];
+                let bh = data[3 * numAnchors + i];
+
+                let x = (cx - bw / 2) * (canvas.width / 640);
+                let y = (cy - bh / 2) * (canvas.height / 640);
+                let w = bw * (canvas.width / 640);
+                let h = bh * (canvas.height / 640);
+
+                detections.push({ x, y, w, h, prob: maxProb, classId });
+            }
+        }
+
+        // NMS - УБИРАЕМ ДУБЛИКАТЫ РАМОК
+        detections.sort((a, b) => b.prob - a.prob);
+        const finalBoxes = [];
+        while (detections.length > 0) {
+            const best = detections.shift();
+            finalBoxes.push(best);
+            detections = detections.filter(box => iou(best, box) < 0.45);
+        }
+
+        let safeCount = 0;
+        let badCount = 0;
+
+        finalBoxes.forEach(box => {
+            const labelName = labels[box.classId] ? labels[box.classId] : "Object";
+            const labelLower = labelName.toLowerCase();
+            
+            if (labelLower === "person" || labelLower === "human") return;
+
+            const isBad = labelLower.includes("no");
+            const color = isBad ? "#ef4444" : "#22c55e";
+            const text = isBad ? "НАРУШИТЕЛЬ" : "В ЗАЩИТЕ";
+            
+            if (isBad) badCount++; else safeCount++;
+
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 4;
+            ctx.strokeRect(box.x, box.y, box.w, box.h);
+
+            ctx.fillStyle = color;
+            ctx.fillRect(box.x, box.y > 25 ? box.y - 25 : 0, box.w, 25);
+            
+            ctx.fillStyle = "white";
+            ctx.font = "bold 14px Arial";
+            ctx.fillText(`${text} ${Math.round(box.prob * 100)}%`, box.x + 5, box.y > 25 ? box.y - 7 : 18);
+        });
+
+        document.getElementById('count-safe').innerText = safeCount;
+        document.getElementById('count-bad').innerText = badCount;
+    }
+
+    function iou(b1, b2) {
+        const x1 = Math.max(b1.x, b2.x), y1 = Math.max(b1.y, b2.y);
+        const x2 = Math.min(b1.x + b1.w, b2.x + b2.w), y2 = Math.min(b1.y + b1.h, b2.y + b2.h);
+        const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+        const union = b1.w * b1.h + b2.w * b2.h - inter;
+        return inter / union;
+    }
+
+    confRange.addEventListener('input', (e) => {
+        confValLabel.innerText = e.target.value + '%';
+    });
+
+    init();
+</script>
+</body>
+</html>eoProcessorBase, RTCConfiguration
 import av
 
 st.set_page_config(page_title="SafeGuard PRO", layout="centered")
